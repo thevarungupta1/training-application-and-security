@@ -2,7 +2,8 @@
 
 **Audience:** Developers joining the mortgage-platform training  
 **Platform:** Windows 10 (build 19041 or later) or Windows 11  
-**Shell:** Windows PowerShell 5.1 or PowerShell 7  
+**Editor:** VS Code or Notepad (File Explorer to create folders)  
+**Terminal:** Command Prompt, VS Code terminal, or PowerShell (any one can run Python)  
 **Depends on:** Lab 01 workstation readiness (Python, Git for Windows, browser)  
 **Estimated time:** 3 to 3.5 hours, including the capstone  
 **Last reviewed:** 31 August 2026
@@ -37,7 +38,7 @@ The lab series is complete when you can show:
 
 Each hands-on lab is **independent**. You may complete a single lab without finishing the others, provided you meet that lab's **Before you start** section.
 
-Labs 2.1, 2.2, 2.3, 2.5, and 2.7 need a local API on port 8000. Complete **Shared Windows environment setup** once, then leave that API running in a dedicated PowerShell window. Labs 2.4, 2.6, 2.8, 2.9, and 2.10 do not need the local API.
+Labs 2.1, 2.2, 2.3, 2.5, and 2.7 need a local API on port 8000. Complete **Shared Windows environment setup** once, then leave that API running in a dedicated terminal window. Labs 2.4, 2.6, 2.8, 2.9, and 2.10 do not need the local API.
 
 Keep the API console visible. Log lines such as `Simulating PostgreSQL lookup` are part of the trace.
 
@@ -45,71 +46,43 @@ Keep the API console visible. Log lines such as `Simulating PostgreSQL lookup` a
 
 Complete this section when a lab says the local mortgage API must be running. Skip it if the API is already listening on port 8000.
 
+**You do not need PowerShell to create the project.** Create folders in File Explorer and files in VS Code (or Notepad), the same way you would any local Python app. The only local commands you need after that are `python` / `pip` (to install and run the API). PowerShell is required later only for `Test-NetConnection` (Labs 2.2, 2.3, 2.7). Commands such as `curl.exe`, `netstat`, `nslookup`, and `tracert` also work in **Command Prompt** and the **VS Code terminal**.
+
 ### Tools you need
 
-| Tool | How to verify in PowerShell | If missing |
+| Tool | How to verify | If missing |
 | --- | --- | --- |
-| Python 3 | `python --version` | Complete Lab 01 Python setup, or use `py -3 --version` |
+| File Explorer + VS Code (or Notepad) | You can create a folder and save a `.py` file | Lab 01 VS Code install |
+| Python 3 | `python --version` in Command Prompt, VS Code terminal, or PowerShell | Complete Lab 01 Python setup, or use `py -3 --version` |
 | pip (via Python) | `python -m pip --version` | Reinstall Python with pip enabled |
-| PyPI or internal package index | `python -m pip index versions fastapi` (or a test `pip install`) | Instructor proxy / `--index-url`; Labs 2.1–2.3, 2.5, 2.7 cannot start without packages |
-| curl | `curl.exe --version` | Use `curl.exe`, not `curl` (PowerShell 5 aliases `curl` to `Invoke-WebRequest`) |
-| Git for Windows (optional, for OpenSSL) | `git --version` | Lab 01 install; used only in Lab 2.6 |
+| PyPI or internal package index | A successful `pip install` of the requirements file | Instructor proxy / `--index-url`; Labs 2.1–2.3, 2.5, 2.7 cannot start without packages |
 | Web browser | Edge, Chrome, or Firefox | Required for Lab 2.1 and Lab 2.5 |
+| curl (optional; browser can replace it for GET) | `curl.exe --version` | Built into Windows 10/11; if you type `curl` in old PowerShell, use `curl.exe` instead |
+| Git for Windows (optional, for OpenSSL) | `git --version` | Lab 01 install; used only in Lab 2.6 |
 
-If `python` is not found, retry with the Windows launcher:
-
-```powershell
-py -3 --version
-```
-
-Use **one** interpreter for the whole lab. `python` and `py -3` can be different versions on the same PC. If `python --version` works, keep using `python`. Only switch to `py -3` if `python` is missing.
+If `python` is not found, retry `py -3 --version`. Use **one** interpreter for the whole lab. `python` and `py -3` can be different versions on the same PC. If `python --version` works, keep using `python`.
 
 This setup needs **outbound HTTPS to the Python package index** (or an instructor-provided index). If `pip` cannot download packages, stop and get the organization proxy or `--index-url` from the instructor. Do not continue until `fastapi` and `uvicorn` are installed.
 
-### Create the project
+### Create the project manually
 
-Open **PowerShell**. Create the lab folder on the Windows filesystem (not under WSL). Prefer `C:\Projects` (same root as Lab 01). If Windows denies creating that folder, use your user profile instead.
+Prefer `C:\Projects\mortgage-network-lab` (same root as Lab 01). If Windows will not let you create `C:\Projects`, use `Documents\mortgage-network-lab` instead and use that path in the `cd` commands later. Put the project on the Windows filesystem, not inside WSL.
 
-```powershell
-$LabRoot = "C:\Projects\mortgage-network-lab"
-try {
-    New-Item -ItemType Directory -Force "$LabRoot\app" -ErrorAction Stop | Out-Null
-} catch {
-    $LabRoot = Join-Path $env:USERPROFILE "Projects\mortgage-network-lab"
-    New-Item -ItemType Directory -Force "$LabRoot\app" | Out-Null
-}
-New-Item -ItemType Directory -Force "$LabRoot\storage" | Out-Null
-Set-Location $LabRoot
-Write-Host "Lab folder: $LabRoot"
-```
-
-If you use the profile path, substitute it everywhere this guide shows `C:\Projects\mortgage-network-lab`.
-
-Expected layout:
+1. Open **File Explorer**.
+2. Go to `C:\`. Create a folder named `Projects` if it does not already exist.
+3. Open `C:\Projects`. Create a folder named `mortgage-network-lab`.
+4. Open `mortgage-network-lab`. Create two folders named `app` and `storage`.
+5. Open `C:\Projects\mortgage-network-lab` in **VS Code** (**File > Open Folder**). Notepad works if VS Code is not available.
+6. Create a new file named `requirements.txt` in the project root. Paste the two lines below and save (**Ctrl+S**).
 
 ```text
-C:\Projects\mortgage-network-lab\
-|-- app\
-|   `-- main.py
-|-- storage\
-`-- requirements.txt
-```
-
-Create `requirements.txt`:
-
-Use **ASCII** encoding. Windows PowerShell 5.1 `Set-Content -Encoding utf8` writes a UTF-8 BOM, and `pip` can then fail to read `requirements.txt`.
-
-```powershell
-@"
 fastapi
 uvicorn
-"@ | Set-Content -Encoding ascii .\requirements.txt
 ```
 
-Create `app\main.py`. This service is a **simulation**. It does not connect to a real PostgreSQL instance or to AWS S3. Loan records are in-memory. Uploaded documents are written under `storage\` so you can see the "object store" on disk.
+7. Create a new file named `main.py` inside the `app` folder. Paste the Python below and save. This service is a **simulation**. It does not connect to a real PostgreSQL instance or to AWS S3. Loan records are in-memory. Uploaded documents are written under `storage\` so you can see the "object store" on disk.
 
-```powershell
-@"
+```python
 from fastapi import FastAPI, HTTPException
 from datetime import datetime
 from pathlib import Path
@@ -170,55 +143,69 @@ def store_document(loan_id: int, filename: str):
         "storage": "simulated-s3",
         "status": "STORED",
     }
-"@ | Set-Content -Encoding ascii .\app\main.py
 ```
+
+8. Confirm this layout in File Explorer or the VS Code explorer:
+
+```text
+C:\Projects\mortgage-network-lab\
+|-- app\
+|   `-- main.py
+|-- storage\
+`-- requirements.txt
+```
+
+If you used `Documents\mortgage-network-lab`, the files are the same; only the root path changes.
 
 ### Create the virtual environment and install packages
 
-```powershell
-Set-Location C:\Projects\mortgage-network-lab
+These are local **Python** commands, not PowerShell scripts. Run them in **Command Prompt**, the **VS Code terminal** (Terminal > New Terminal), or PowerShell. First `cd` into the project folder.
+
+```text
+cd C:\Projects\mortgage-network-lab
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m pip install --upgrade pip
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-If this fails with a connection or proxy error, retry with the instructor-provided proxy or index, for example:
+If `python` is not recognized, replace `python` with `py -3` on the `venv` line only, then keep using `.venv\Scripts\python.exe` for pip.
 
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt --proxy http://proxy.contoso.com:8080
+If pip fails with a connection or proxy error, retry with the instructor-provided proxy or index, for example:
+
+```text
+.venv\Scripts\python.exe -m pip install -r requirements.txt --proxy http://proxy.contoso.com:8080
 ```
 
 Replace the proxy URL with the real training-network value. Do not invent one.
 
-If you prefer to activate the environment in the current session:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-```
-
-If PowerShell blocks `Activate.ps1`, do not change the machine-wide execution policy. Call `.\.venv\Scripts\python.exe` and `.\.venv\Scripts\uvicorn.exe` directly, as shown below.
+You do not need to activate the virtual environment. Calling `.venv\Scripts\python.exe` uses that environment directly and avoids PowerShell execution-policy problems with `Activate.ps1`.
 
 ### Start the API
 
-Before starting, confirm port 8000 is free. If another process is already `LISTENING`, uvicorn will fail:
+Before starting, confirm port 8000 is free. If another process is already `LISTENING`, uvicorn will fail. In Command Prompt, VS Code terminal, or PowerShell:
 
-```powershell
+```text
 netstat -ano | findstr :8000
 ```
 
-If you see `LISTENING`, identify the PID (last column), confirm it is an old Python/uvicorn process, and stop it (`Stop-Process -Id <PID>`). Then start the API.
+If you see `LISTENING`, note the PID (last column). Confirm it is an old Python/uvicorn process in Task Manager, then stop it with:
 
-Use a **dedicated** PowerShell window and leave it open:
+```text
+taskkill /PID <PID> /F
+```
 
-```powershell
-Set-Location C:\Projects\mortgage-network-lab
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+Replace `<PID>` with the number from `netstat`. Do not stop unrelated processes.
+
+Use a **dedicated** terminal window (leave it open while you work through the labs):
+
+```text
+cd C:\Projects\mortgage-network-lab
+.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 `--host 127.0.0.1` binds **IPv4 loopback only**. On Windows, `localhost` often resolves to IPv6 `::1` first. A browser request to `http://localhost:8000` can fail even while the API is healthy. Always use `http://127.0.0.1:8000`. Do not use `0.0.0.0` on a managed training workstation unless the instructor asks you to.
 
-Wait until the console shows startup, then use the second window. Do not call the API before this line appears:
+Wait until the console shows startup. Do not call the API before this line appears:
 
 ```text
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
@@ -229,9 +216,15 @@ Windows Defender Firewall may prompt the first time Python listens on a port. Al
 
 ### Confirm the API is up
 
-In a **second** PowerShell window:
+Open a browser (no terminal required):
 
-```powershell
+```text
+http://127.0.0.1:8000/health
+```
+
+You should see JSON with `"status":"UP"`. Optional check from a **second** terminal:
+
+```text
 curl.exe http://127.0.0.1:8000/health
 ```
 
@@ -245,18 +238,15 @@ Expected body:
 
 In the API window press `Ctrl+C`. Confirm the port is free:
 
-```powershell
+```text
 netstat -ano | findstr :8000
 ```
 
-No `LISTENING` row should remain. If a process is stuck, note the PID in the last column and stop only that process after confirming it is your Python/uvicorn instance:
+No `LISTENING` row should remain. If a process is stuck, note the PID and stop only that process:
 
-```powershell
-Get-Process -Id <PID>
-Stop-Process -Id <PID>
+```text
+taskkill /PID <PID> /F
 ```
-
-Replace `<PID>` with the number from `netstat`. Do not stop unrelated processes.
 
 ---
 
@@ -311,7 +301,7 @@ Simulated PostgreSQL    Simulated S3
 
    Expected fields include `loan_id`, `borrower`, `status`, and `amount`.
 
-3. Watch the API PowerShell window. You should see lines similar to:
+3. Watch the API terminal window. You should see lines similar to:
 
    ```text
    Request received for loan 1001
@@ -320,7 +310,7 @@ Simulated PostgreSQL    Simulated S3
 
    That printout is the "database hop." The browser never talks to PostgreSQL directly.
 
-4. Repeat from PowerShell so you can script the same call later:
+4. Repeat from a second terminal (Command Prompt, VS Code terminal, or PowerShell) so you can script the same call later:
 
    ```powershell
    curl.exe http://127.0.0.1:8000/loans/1001
@@ -1433,7 +1423,7 @@ You are done when you can hand an instructor:
 | DNS | `nslookup example.com` |
 | Traceroute | `tracert example.com` |
 | HTTPS / TLS (curl) | `curl.exe -v https://example.com` |
-| Start API | `.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000` |
+| Start API | `.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000` |
 
 Use `curl.exe` in Windows PowerShell 5.1. The alias `curl` invokes `Invoke-WebRequest` and does not accept the same switches.
 
@@ -1443,15 +1433,15 @@ Use `curl.exe` in Windows PowerShell 5.1. The alias `curl` invokes `Invoke-WebRe
 | --- | --- | --- |
 | `python` not recognized | PATH / launcher | Use `py -3` or complete Lab 01 |
 | `python` and `py -3` disagree | Two interpreters installed | Use only the one that created `.venv` |
-| Access denied creating `C:\Projects` | No write to `C:\` | Use `$env:USERPROFILE\Projects\mortgage-network-lab` |
+| Access denied creating `C:\Projects` | No write to `C:\` | Create `Documents\mortgage-network-lab` in File Explorer instead |
 | `pip` connection / SSL / proxy error | No route to PyPI | Instructor proxy or `--index-url`; do not skip package install |
-| `ERROR: Invalid requirement` on pip install | UTF-8 BOM in `requirements.txt` | Recreate the file with `Set-Content -Encoding ascii` |
-| `Activate.ps1` cannot be loaded | Execution policy | Call `.\.venv\Scripts\python.exe` directly |
-| `[Errno 10048] address already in use` | Port 8000 occupied | `netstat -ano \| findstr :8000` then stop the confirmed PID |
+| `ERROR: Invalid requirement` on pip install | UTF-8 BOM in `requirements.txt` (often from Notepad "UTF-8") | Recreate the file in VS Code and save as UTF-8 |
+| `Activate.ps1` cannot be loaded | Execution policy | Do not activate; call `.venv\Scripts\python.exe` directly |
+| `[Errno 10048] address already in use` | Port 8000 occupied | `netstat -ano \| findstr :8000` then `taskkill /PID <PID> /F` after confirming the process |
 | Browser cannot open `http://localhost:8000` | IPv6 `::1` vs bind on `127.0.0.1` | Use `http://127.0.0.1:8000` only |
 | `/docs` is a blank page | Swagger UI CDN blocked | Use `curl.exe` and `/openapi.json` |
 | `curl: unrecognized option` | `curl` alias | Use `curl.exe` |
-| Port 8000 already in use after Ctrl+C | Leftover uvicorn reload child | `netstat -ano \| findstr :8000` then `Stop-Process -Id <PID>` after confirming the process |
+| Port 8000 already in use after Ctrl+C | Leftover uvicorn reload child | `netstat -ano \| findstr :8000` then `taskkill /PID <PID> /F` after confirming the process |
 | Browser cannot open 127.0.0.1 | API not started or crashed | Wait for `Application startup complete`; check the uvicorn traceback |
 | `openssl` not found | Not on PATH | Use `C:\Program Files\Git\usr\bin\openssl.exe` or the Lab 2.6 .NET script |
 | OpenSSL `Verify return code: 20` | Git OpenSSL ignores Windows CAs | Acceptable if `curl.exe -v https://example.com` verifies; record cipher/subject anyway |
