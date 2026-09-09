@@ -237,6 +237,57 @@ DATABASE_PASSWORD = "Mortgage@12345"
 
 Install and run secret scan:
 
+Open the official Gitleaks releases page:
+
+[Gitleaks Releases on GitHub](https://github.com/gitleaks/gitleaks/releases)
+
+Download the latest Windows x64 ZIP, whose name will look similar to:
+```bash
+gitleaks_<version>_windows_x64.zip
+````
+
+Extract it. Inside you should have:
+```bash
+gitleaks.exe
+LICENSE
+README.md
+```
+
+Create a tools directory:
+```powershell
+New-Item -ItemType Directory -Force C:\Tools\Gitleaks
+```
+Copy `gitleaks.exe` there, so you have:
+
+```bash
+C:\Tools\Gitleaks\gitleaks.exe
+```
+Test it directly first:
+```
+C:\Tools\Gitleaks\gitleaks.exe version
+```
+If that works, Gitleaks itself is installed correctly.
+
+Add Gitleaks to PATH
+
+Run:
+```
+$oldPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$newPath = $oldPath + ";C:\Tools\Gitleaks"
+
+[Environment]::SetEnvironmentVariable(
+    "Path",
+    $newPath,
+    "User"
+)
+```
+Close the terminal completely and open a new PowerShell terminal.
+
+Then:
+```
+gitleaks version
+```
+
 ```powershell
 # install method may vary by enterprise policy
 gitleaks version
