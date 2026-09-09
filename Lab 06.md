@@ -133,8 +133,11 @@ Create and activate virtual environment:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
+
+.\.venv\Scripts\activate
+
+python -m pip install --upgrade pip    (optional)
+
 pip install fastapi uvicorn pytest httpx
 ```
 
