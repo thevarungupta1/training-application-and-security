@@ -1,524 +1,611 @@
-# Lab 04: PostgreSQL Mortgage Domain Modeling and Query Optimization
+# Lab 04: Agile, Scrum, Story Writing, Sprint Planning, and Mortgage Capstone
 
-**Audience:** Developers and data engineers in the mortgage-platform training  
-**Platform:** PostgreSQL 15+ (or organization-approved equivalent), VS Code, psql or pgAdmin  
-**Focus:** Relational schema design, borrower-loan modeling, and mortgage-query performance tuning  
-**Estimated time:** 2.5 to 3 hours  
-**Last reviewed:** 8 September 2026
+**Audience:** Developers and delivery teams in the mortgage-platform training  
+**Platform:** Jira preferred; Jira Free, Azure Boards, GitHub Projects, Trello, or spreadsheet-based boards are acceptable  
+**Focus:** Agile delivery workflow from business requirement to sprint execution  
+**Estimated time:** 3 hours  
+**Last reviewed:** 2 September 2026
 
 ## Purpose
 
-In this lab, you will design and validate a mortgage servicing relational model in PostgreSQL, then optimize query performance for common servicing workflows. You will:
+In this lab, you will convert mortgage-domain business needs into delivery-ready Agile work. You will:
 
-- design a PostgreSQL schema for a mortgage servicing system;
-- create a borrower-to-loan relationship model with clear cardinality and integrity constraints;
-- write optimized mortgage queries for operational and servicing use cases;
-- improve a deliberately slow mortgage search query with indexing; and
-- finalize a baseline relational model for the mortgage domain capstone.
+- create a backlog hierarchy from Epic to Story;
+- write high-quality user stories using the standard story format;
+- define measurable acceptance criteria using Given/When/Then;
+- apply INVEST and improve weak story statements;
+- estimate stories using planning poker and story points;
+- identify technical, enterprise, and compliance dependencies;
+- create Sprint 1 and Sprint 2 plans for the capstone platform; and
+- produce delivery artifacts expected in regulated enterprise teams.
 
-This lab focuses on data architecture and SQL behavior. It does not require application-service implementation.
+This lab is planning and delivery design only. You are not required to build the application code.
 
 ## Completion criteria
 
-The lab is complete when you can show:
+The lab is complete when your team can show:
 
-- a normalized mortgage servicing schema with primary keys, foreign keys, and essential constraints;
-- a borrower-to-loan model that supports one borrower with multiple loans and co-borrower scenarios;
-- optimized SQL queries for loan lookup, delinquency detection, and servicing dashboard metrics;
-- a measured performance improvement for the mini exercise slow query after index tuning; and
-- capstone evidence that the baseline relational model is finalized for the mortgage domain.
+- one Epic and three Features for the core mortgage scope;
+- user stories for onboarding, verification, and delinquency monitoring;
+- acceptance criteria for each key story using Given/When/Then;
+- at least one INVEST refactoring from vague request to compliant stories;
+- story-point estimates with planning rationale;
+- a dependency map that includes technical and external dependencies;
+- Definition of Ready and Definition of Done checklists;
+- Sprint 1 and Sprint 2 goals with story selections and capacity fit;
+- a sprint board flow and sample movement of work items; and
+- a capstone traceability matrix mapping requirement to release.
 
-## Operating model and context
+## Operating model and scope
 
-Use a dedicated training database and keep all schema objects in a single schema namespace (for example, `mortgage_lab`) to simplify cleanup and review.
+Use a backlog tool that your team can share in real time. If a board tool is unavailable, maintain all artifacts in a structured spreadsheet.
+
+Recommended team setup: 4-6 people.
+
+| Role | Responsibility |
+| --- | --- |
+| Product Owner | Clarifies mortgage requirements and priority |
+| Scrum Master | Facilitates planning, sequencing, and blockers |
+| Backend Developer | API, data, and integration work decomposition |
+| Frontend Developer | UI flow and user interaction decomposition |
+| QA Engineer | Acceptance quality and testability coverage |
+| Security/DevOps Engineer | Security, auditability, CI/CD, and operations readiness |
+
+If your team is smaller, assign multiple roles per participant.
+
+## Architecture context for planning
+
+The architecture context below is intentionally lightweight and exists only to support dependency mapping.
 
 ```mermaid
-erDiagram
-    BORROWER ||--o{ BORROWER_LOAN : linked_to
-    LOAN ||--o{ BORROWER_LOAN : linked_to
-    LOAN ||--o{ PAYMENT_SCHEDULE : has
-    LOAN ||--o{ SERVICING_EVENT : records
+flowchart TB
+    U[Borrower / Operations User] --> UI[Web or Mobile UI]
+    UI --> GW[API Gateway]
+    GW --> ONB[Onboarding API]
+    GW --> VER[Verification API]
+    GW --> SRV[Servicing API]
+    ONB --> DB[(PostgreSQL)]
+    VER --> DB
+    SRV --> DB
+    VER --> EXTV[External Verification Service]
+    DOC[Document Service] --> OBJ[Object Storage]
+    SRV --> NOTIF[Notification Service]
+```
 
-    BORROWER {
-        bigint borrower_id PK
-        text first_name
-        text last_name
-        text email
-        date date_of_birth
-        text ssn_last4
-    }
+This architecture implies common sequencing constraints. For example, verification work depends on borrower onboarding data.
 
-    LOAN {
-        bigint loan_id PK
-        text loan_number
-        numeric original_principal
-        numeric current_balance
-        numeric interest_rate
-        date origination_date
-        text loan_status
-        date next_due_date
-    }
+## Lab workflow
 
-    BORROWER_LOAN {
-        bigint borrower_loan_id PK
-        bigint borrower_id FK
-        bigint loan_id FK
-        text borrower_role
-        date relationship_start_date
-    }
+Work through the stages in order.
 
-    PAYMENT_SCHEDULE {
-        bigint payment_schedule_id PK
-        bigint loan_id FK
-        date due_date
-        numeric due_amount
-        date paid_date
-        text payment_status
-    }
-
-    SERVICING_EVENT {
-        bigint servicing_event_id PK
-        bigint loan_id FK
-        text event_type
-        timestamp event_ts
-        text event_notes
-    }
+```mermaid
+flowchart TD
+    A[Business Requirement] --> B[Epic]
+    B --> C[Feature]
+    C --> D[User Story]
+    D --> E[Acceptance Criteria]
+    E --> F[INVEST Check]
+    F --> G[Story Point Estimation]
+    G --> H[Dependency Mapping]
+    H --> I[Prioritization]
+    I --> J[Sprint Planning]
+    J --> K[Sprint Board]
+    K --> L[Review and Retrospective]
 ```
 
 ---
 
-## Hands-on Lab
+## Exercise 1 - Build backlog hierarchy
 
-### 0. Set up PostgreSQL with Docker and verify connection
+Create the core hierarchy:
 
-Start PostgreSQL in a local Docker container so all remaining steps run against the same database instance.
+- Epic: `EPIC-01 Mortgage Borrower Lifecycle Management`
+- Feature: `Mortgage Onboarding`
+- Feature: `Borrower Verification`
+- Feature: `Delinquency Monitoring`
 
-```powershell
-docker pull postgres:16
+Epic description:
 
-docker run --name mortgage-pg \
-    -e POSTGRES_USER=mortgage_user \
-    -e POSTGRES_PASSWORD=mortgage_pass \
-    -e POSTGRES_DB=mortgage_servicing \
-    -p 5432:5432 \
-    -d postgres:16
-```
+Provide capabilities for borrower onboarding, borrower verification, mortgage application processing, servicing intelligence, and delinquency monitoring.
 
-If a previous container with the same name already exists, start it:
+Business objective:
 
-```powershell
-docker start mortgage-pg
-```
-
-Verify container health and port binding:
-
-```powershell
-docker ps --filter "name=mortgage-pg"
-docker logs mortgage-pg --tail 30
-```
-
-Wait until logs show PostgreSQL is ready to accept connections.
-
-Connect from the host using psql:
-
-```powershell
-psql -h localhost -p 5432 -U mortgage_user -d mortgage_servicing
-```
-
-When prompted, enter password: `mortgage_pass`
-
-If `psql` is not installed on the host, connect from inside the container:
-
-```powershell
-docker exec -it mortgage-pg bash
-psql -U mortgage_user -d mortgage_servicing
-```
-
-Alternative single command without opening an interactive shell:
-
-```powershell
-docker exec -it mortgage-pg psql -U mortgage_user -d mortgage_servicing
-```
-
-Run a smoke check in psql:
-
-```sql
-SELECT current_database(), current_user, version();
-```
-
-Expected outcome:
-
-- container `mortgage-pg` is running;
-- PostgreSQL is reachable on `localhost:5432`; and
-- psql connection succeeds to database `mortgage_servicing`.
-
-Continue with Step 1 using the same active connection.
-
-### 1. Create schema foundation for mortgage servicing
-
-Create a schema and core tables with integrity rules.
-
-```sql
-CREATE SCHEMA IF NOT EXISTS mortgage_lab;
-SET search_path TO mortgage_lab;
-
-CREATE TABLE IF NOT EXISTS borrower (
-    borrower_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    first_name TEXT NOT NULL,
-    last_name TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE,
-    date_of_birth DATE NOT NULL,
-    ssn_last4 CHAR(4) NOT NULL CHECK (ssn_last4 ~ '^[0-9]{4}$')
-);
-
-CREATE TABLE IF NOT EXISTS loan (
-    loan_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    loan_number TEXT NOT NULL UNIQUE,
-    original_principal NUMERIC(14,2) NOT NULL CHECK (original_principal > 0),
-    current_balance NUMERIC(14,2) NOT NULL CHECK (current_balance >= 0),
-    interest_rate NUMERIC(5,3) NOT NULL CHECK (interest_rate > 0),
-    origination_date DATE NOT NULL,
-    loan_status TEXT NOT NULL CHECK (loan_status IN ('ACTIVE', 'PAID_OFF', 'DELINQUENT', 'FORBEARANCE')),
-    next_due_date DATE
-);
-
-CREATE TABLE IF NOT EXISTS borrower_loan (
-    borrower_loan_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    borrower_id BIGINT NOT NULL REFERENCES borrower(borrower_id) ON DELETE RESTRICT,
-    loan_id BIGINT NOT NULL REFERENCES loan(loan_id) ON DELETE RESTRICT,
-    borrower_role TEXT NOT NULL CHECK (borrower_role IN ('PRIMARY', 'CO_BORROWER')),
-    relationship_start_date DATE NOT NULL,
-    UNIQUE (borrower_id, loan_id)
-);
-
-CREATE TABLE IF NOT EXISTS payment_schedule (
-    payment_schedule_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    loan_id BIGINT NOT NULL REFERENCES loan(loan_id) ON DELETE CASCADE,
-    due_date DATE NOT NULL,
-    due_amount NUMERIC(12,2) NOT NULL CHECK (due_amount > 0),
-    paid_date DATE,
-    payment_status TEXT NOT NULL CHECK (payment_status IN ('DUE', 'PAID', 'LATE', 'PARTIAL'))
-);
-
-CREATE TABLE IF NOT EXISTS servicing_event (
-    servicing_event_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    loan_id BIGINT NOT NULL REFERENCES loan(loan_id) ON DELETE CASCADE,
-    event_type TEXT NOT NULL,
-    event_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    event_notes TEXT
-);
-```
-
-Validation checks:
-
-- each table has a surrogate primary key;
-- required fields are `NOT NULL`;
-- borrower-loan duplicates are prevented;
-- loan and payment statuses are constrained to valid domain values.
-
-### 2. Build borrower-to-loan relationship model
-
-Insert sample records to validate cardinality and role handling.
-
-```sql
-INSERT INTO borrower (first_name, last_name, email, date_of_birth, ssn_last4)
-VALUES
-('Ava', 'Martin', 'ava.martin@example.com', '1988-06-14', '2241'),
-('Noah', 'Rivera', 'noah.rivera@example.com', '1985-11-02', '9083'),
-('Mia', 'Chen', 'mia.chen@example.com', '1990-03-21', '7710');
-
-INSERT INTO loan (loan_number, original_principal, current_balance, interest_rate, origination_date, loan_status, next_due_date)
-VALUES
-('LN-100001', 420000.00, 396450.33, 6.125, '2024-01-18', 'ACTIVE', '2026-10-01'),
-('LN-100002', 310000.00, 305900.10, 5.875, '2025-04-10', 'ACTIVE', '2026-10-01');
-
-INSERT INTO borrower_loan (borrower_id, loan_id, borrower_role, relationship_start_date)
-VALUES
-(1, 1, 'PRIMARY', '2024-01-18'),
-(2, 1, 'CO_BORROWER', '2024-01-18'),
-(3, 2, 'PRIMARY', '2025-04-10');
-```
-
-Model verification query:
-
-```sql
-SELECT
-    l.loan_number,
-    b.borrower_id,
-    b.first_name,
-    b.last_name,
-    bl.borrower_role
-FROM borrower_loan bl
-JOIN borrower b ON b.borrower_id = bl.borrower_id
-JOIN loan l ON l.loan_id = bl.loan_id
-ORDER BY l.loan_number, bl.borrower_role;
-```
-
-Expected interpretation:
-
-- one loan can map to multiple borrowers (`PRIMARY`, `CO_BORROWER`);
-- one borrower can participate in one or more loans over time;
-- role semantics are explicit in the junction table.
-
-### 3. Write optimized mortgage queries
-
-Use the following operational query patterns.
-
-#### Query A: Borrower portfolio view
-
-```sql
-SELECT
-    b.borrower_id,
-    b.first_name,
-    b.last_name,
-    l.loan_number,
-    l.current_balance,
-    l.loan_status,
-    l.next_due_date
-FROM borrower b
-JOIN borrower_loan bl ON bl.borrower_id = b.borrower_id
-JOIN loan l ON l.loan_id = bl.loan_id
-WHERE b.email = 'ava.martin@example.com'
-ORDER BY l.next_due_date;
-```
-
-#### Query B: Delinquency candidate detection
-
-```sql
-SELECT
-    l.loan_number,
-    l.current_balance,
-    ps.due_date,
-    ps.payment_status
-FROM loan l
-JOIN payment_schedule ps ON ps.loan_id = l.loan_id
-WHERE ps.payment_status IN ('LATE', 'DUE')
-  AND ps.due_date < CURRENT_DATE
-  AND l.loan_status = 'ACTIVE'
-ORDER BY ps.due_date ASC;
-```
-
-#### Query C: Recent servicing timeline per loan
-
-```sql
-SELECT
-    l.loan_number,
-    se.event_type,
-    se.event_ts,
-    se.event_notes
-FROM loan l
-JOIN servicing_event se ON se.loan_id = l.loan_id
-WHERE l.loan_number = 'LN-100001'
-ORDER BY se.event_ts DESC
-LIMIT 20;
-```
-
-Add performance-supporting indexes for the query patterns above.
-
-```sql
-CREATE INDEX IF NOT EXISTS idx_borrower_email ON borrower (email);
-CREATE INDEX IF NOT EXISTS idx_borrower_loan_borrower_id ON borrower_loan (borrower_id);
-CREATE INDEX IF NOT EXISTS idx_borrower_loan_loan_id ON borrower_loan (loan_id);
-CREATE INDEX IF NOT EXISTS idx_loan_status_due_date ON loan (loan_status, next_due_date);
-CREATE INDEX IF NOT EXISTS idx_payment_schedule_loan_status_due ON payment_schedule (loan_id, payment_status, due_date);
-CREATE INDEX IF NOT EXISTS idx_servicing_event_loan_ts ON servicing_event (loan_id, event_ts DESC);
-```
-
-Use `EXPLAIN (ANALYZE, BUFFERS)` on each query and capture planning and execution timing before and after indexing when data volume is sufficient.
-
-### 4. Load realistic mortgage-scale sample data for performance testing
-
-Use generated data so query tuning reflects realistic table sizes.
-
-```sql
-INSERT INTO borrower (first_name, last_name, email, date_of_birth, ssn_last4)
-SELECT
-    'Borrower' || gs,
-    'Last' || gs,
-    'borrower' || gs || '@example.com',
-    DATE '1970-01-01' + ((gs % 15000) * INTERVAL '1 day'),
-    LPAD((1000 + (gs % 9000))::text, 4, '0')
-FROM generate_series(100, 5100) gs;
-
-INSERT INTO loan (loan_number, original_principal, current_balance, interest_rate, origination_date, loan_status, next_due_date)
-SELECT
-    'LN-' || TO_CHAR(gs, 'FM000000'),
-    150000 + (gs % 400000),
-    120000 + (gs % 350000),
-    4.500 + ((gs % 250) / 100.0),
-    DATE '2018-01-01' + ((gs % 2500) * INTERVAL '1 day'),
-    CASE WHEN gs % 12 = 0 THEN 'DELINQUENT' ELSE 'ACTIVE' END,
-    CURRENT_DATE + ((gs % 45) * INTERVAL '1 day')
-FROM generate_series(100, 10100) gs;
-
-INSERT INTO borrower_loan (borrower_id, loan_id, borrower_role, relationship_start_date)
-SELECT
-    b.borrower_id,
-    l.loan_id,
-    'PRIMARY',
-    l.origination_date
-FROM borrower b
-JOIN loan l ON l.loan_id = b.borrower_id
-WHERE b.borrower_id >= 100;
-```
-
-Optional co-borrower distribution:
-
-```sql
-INSERT INTO borrower_loan (borrower_id, loan_id, borrower_role, relationship_start_date)
-SELECT
-    b2.borrower_id,
-    l.loan_id,
-    'CO_BORROWER',
-    l.origination_date
-FROM loan l
-JOIN borrower b2 ON b2.borrower_id = l.loan_id + 1
-WHERE l.loan_id % 5 = 0;
-```
-
-Data quality checks:
-
-```sql
-SELECT COUNT(*) AS borrower_count FROM borrower;
-SELECT COUNT(*) AS loan_count FROM loan;
-SELECT borrower_role, COUNT(*) FROM borrower_loan GROUP BY borrower_role ORDER BY borrower_role;
-```
-
-### 5. Validate query plans and document optimization evidence
-
-Capture before/after execution evidence for at least two critical servicing queries.
-
-```sql
-EXPLAIN (ANALYZE, BUFFERS, VERBOSE)
-SELECT
-    l.loan_number,
-    l.current_balance,
-    ps.due_date,
-    ps.payment_status
-FROM loan l
-JOIN payment_schedule ps ON ps.loan_id = l.loan_id
-WHERE ps.payment_status IN ('LATE', 'DUE')
-  AND ps.due_date < CURRENT_DATE
-  AND l.loan_status = 'ACTIVE'
-ORDER BY ps.due_date ASC;
-```
-
-Evidence checklist:
-
-- baseline plan shows sequential or high-cost scans;
-- tuned plan shows effective index usage;
-- measured runtime and buffer reads are reduced;
-- result set correctness is unchanged after tuning.
+Reduce manual mortgage processing while improving traceability, risk monitoring, operational efficiency, and borrower servicing.
 
 ---
 
-## Mini Exercise
+## Exercise 2 - Write onboarding stories
 
-### Optimize slow mortgage search query using indexes
+Start from the broad request:
 
-Start from this intentionally slow pattern:
+We need borrowers to submit their mortgage information online.
 
-```sql
-SELECT
-    l.loan_number,
-    b.first_name,
-    b.last_name,
-    l.current_balance,
-    l.loan_status
-FROM loan l
-JOIN borrower_loan bl ON bl.loan_id = l.loan_id
-JOIN borrower b ON b.borrower_id = bl.borrower_id
-WHERE LOWER(b.last_name) LIKE '%ri%'
-  AND l.loan_status = 'ACTIVE'
-ORDER BY l.current_balance DESC;
-```
+Create these initial stories.
 
-Task:
+### US-101 Create Borrower Profile
 
-- identify the bottleneck with `EXPLAIN (ANALYZE, BUFFERS)`;
-- design index strategy to reduce full scans;
-- re-run explain analyze and compare execution time.
+Story:
 
-Suggested optimization path:
+As a borrower, I want to create my borrower profile, so that I can start my mortgage application.
 
-```sql
-CREATE INDEX IF NOT EXISTS idx_borrower_last_name_lower
-ON borrower ((LOWER(last_name)));
+Acceptance criteria:
 
-CREATE INDEX IF NOT EXISTS idx_loan_status_balance
-ON loan (loan_status, current_balance DESC);
-```
+- Given the borrower is on registration, when all mandatory fields are submitted, then a borrower profile is created.
+- Given an invalid email format, when the form is submitted, then the request is rejected with a validation message.
+- Given mandatory fields are missing, when submission is attempted, then missing fields are identified and no profile is created.
+- Given profile creation succeeds, when processing completes, then a unique borrower identifier is generated.
 
-Stretch refinement:
+### US-102 Submit Mortgage Application
 
-- replace `%ri%` with `ri%` when business allows prefix-only search;
-- evaluate `pg_trgm` for contains-search patterns that cannot use standard B-tree efficiently.
+Story:
 
-Mini exercise success condition:
+As a borrower, I want to submit a mortgage application, so that my loan request can enter underwriting.
 
-- the tuned query shows lower execution time and reduced row scans compared with baseline.
+Acceptance criteria:
 
-### Mini Exercise 2: Add covering index for servicing dashboard query
+- Given an authenticated borrower, when all required mortgage fields are provided, then a mortgage application is created.
+- Given no borrower profile exists, when application submission is attempted, then the request is rejected.
+- Given application creation succeeds, when processing completes, then a unique application identifier is generated.
 
-Scenario:
+### US-103 Upload Mortgage Documents
 
-A servicing dashboard frequently reads active loans sorted by due date while displaying only loan number, status, due date, and balance.
+Story:
 
-Query:
+As a borrower, I want to upload supporting documents, so that mortgage operations can verify my application.
 
-```sql
-SELECT loan_number, loan_status, next_due_date, current_balance
-FROM loan
-WHERE loan_status = 'ACTIVE'
-ORDER BY next_due_date
-LIMIT 100;
-```
+Acceptance criteria:
 
-Task:
+- Given an authenticated borrower with an active application, when a supported file is uploaded, then it is stored securely and linked to the application.
+- Given an unsupported file type, when upload is attempted, then the upload is rejected.
+- Given a file exceeds maximum size, when upload is attempted, then the upload is rejected and a clear error is returned.
 
-- design a covering index for this access pattern;
-- verify plan improvement with `EXPLAIN (ANALYZE, BUFFERS)`;
-- confirm identical functional output.
+Non-functional refinements to attach to this feature:
 
-Suggested starting point:
-
-```sql
-CREATE INDEX IF NOT EXISTS idx_loan_active_due_cover
-ON loan (loan_status, next_due_date)
-INCLUDE (loan_number, current_balance);
-```
-
-### Mini Exercise 3: Compare functional index vs prefix search strategy
-
-Scenario:
-
-Operations wants fast borrower lookup by last name from a type-ahead UI.
-
-Tasks:
-
-- compare `LOWER(last_name) LIKE '%ri%'` and `LOWER(last_name) LIKE 'ri%'`;
-- measure both variants with `EXPLAIN (ANALYZE, BUFFERS)`;
-- explain when to keep a functional B-tree index and when to consider trigram indexing.
-
-Expected conclusion:
-
-- prefix search (`ri%`) generally benefits from B-tree functional indexes;
-- contains search (`%ri%`) often needs trigram (`pg_trgm`) for scalable performance.
+- Sensitive borrower data must not be logged.
+- Profile and document actions must be auditable.
+- Unauthorized users must not retrieve borrower data.
 
 ---
 
-## Capstone Progress
+## Exercise 3 - Write verification stories
 
-### Baseline relational model finalized for mortgage domain
+### US-201 Initiate Borrower Verification
 
-Deliver and review these capstone artifacts:
+Story:
 
-- final ER model with entities, keys, and relationship cardinalities;
-- DDL script containing borrower, loan, borrower_loan, payment_schedule, and servicing_event tables;
-- index strategy document mapped to key mortgage servicing queries;
-- query evidence pack containing at least one before/after `EXPLAIN ANALYZE` result; and
-- assumptions log for future extensions (escrow, property, servicing transfers, investor reporting).
+As an underwriting analyst, I want borrower verification to be initiated, so that identity can be validated before underwriting.
 
-Capstone checkpoint statement:
+Acceptance criteria:
 
-The baseline relational model is finalized for the mortgage domain and is ready for application-service integration in the next lab.
+- Given an application with required borrower data, when verification is initiated, then borrower data is sent to the verification provider.
+- Given the provider returns success, when response processing completes, then status becomes `VERIFIED`.
+- Given the provider returns failure, when response processing completes, then status becomes `VERIFICATION_FAILED`.
+- Given the provider is unavailable, when verification is attempted, then failure is handled gracefully and the mortgage application remains intact.
+
+### US-202 View Borrower Verification Status
+
+Story:
+
+As an underwriting analyst, I want to view verification status, so that I can decide whether underwriting can proceed.
+
+Acceptance criterion:
+
+- Given an authorized analyst, when viewing an application, then the latest verification status is displayed.
+
+Reference status values:
+
+- `NOT_STARTED`
+- `IN_PROGRESS`
+- `VERIFIED`
+- `FAILED`
+- `MANUAL_REVIEW_REQUIRED`
+
+---
+
+## Exercise 4 - Write delinquency stories
+
+### US-301 Detect Delinquent Loans
+
+Story:
+
+As a servicing specialist, I want overdue mortgage accounts identified automatically, so that I can prioritize borrower follow-up.
+
+Acceptance criteria:
+
+- Given a loan with overdue payment behavior, when delinquency evaluation runs, then configured delinquency rules are applied.
+- Given the threshold is met, when evaluation completes, then the loan is marked delinquent.
+- Given the threshold is not met, when evaluation completes, then the loan is not marked delinquent.
+
+### US-302 Generate Delinquency Alert
+
+Story:
+
+As a servicing specialist, I want an alert when a mortgage becomes delinquent, so that timely servicing action can begin.
+
+Acceptance criteria:
+
+- Given a mortgage is newly classified as delinquent, when classification completes, then servicing receives an alert.
+- Given an alert already exists for the same condition, when the same evaluation reruns, then duplicate alert creation is prevented.
+
+Refinement note: discuss idempotency explicitly for repeated processing jobs.
+
+---
+
+## Exercise 5 - Apply INVEST and refine weak stories
+
+Evaluate this weak story:
+
+As a mortgage user, I want the system to handle the complete mortgage lifecycle, so that I can manage mortgages.
+
+INVEST assessment:
+
+- Independent: no
+- Negotiable: partially
+- Valuable: yes, but too broad
+- Estimable: no
+- Small: no
+- Testable: no
+
+Rewrite into smaller compliant stories:
+
+- As a borrower, I want to create my profile, so that I can start an application.
+- As a borrower, I want to submit an application, so that underwriting can begin.
+- As an underwriting analyst, I want identity verification, so that identity risk is reduced.
+- As a servicing specialist, I want delinquency detection, so that at-risk accounts are prioritized.
+
+---
+
+## Exercise 6 - Define Ready and Done
+
+### Definition of Ready
+
+A story is Ready when:
+
+- business value is clear;
+- persona is identified;
+- acceptance criteria exist;
+- dependencies are known;
+- security and data requirements are reviewed;
+- assumptions are documented;
+- story is estimable by the team; and
+- scope fits one sprint.
+
+### Definition of Done
+
+A story is Done when:
+
+- implementation is complete and peer-reviewed;
+- unit and integration tests pass;
+- acceptance criteria are satisfied;
+- security checks pass with no critical issue;
+- logging and audit needs are met;
+- documentation is updated; and
+- product owner acceptance is completed where applicable.
+
+---
+
+## Exercise 7 - Estimate and align on complexity
+
+Use Fibonacci-style points: `1, 2, 3, 5, 8, 13`.
+
+Sample estimate set:
+
+| Story | Points |
+| --- | ---: |
+| US-101 Create Borrower Profile | 3 |
+| US-102 Submit Mortgage Application | 5 |
+| US-103 Upload Mortgage Documents | 5 |
+| US-201 Initiate Verification | 8 |
+| US-202 View Verification Status | 3 |
+| US-301 Detect Delinquent Loans | 8 |
+| US-302 Generate Delinquency Alert | 5 |
+| Total | 37 |
+
+Planning poker focus: expose hidden assumptions before converging on a number.
+
+---
+
+## Exercise 8 - Map dependencies
+
+Build a dependency table.
+
+| Story | Dependency |
+| --- | --- |
+| US-102 Submit Application | US-101 Borrower Profile |
+| US-103 Upload Documents | US-102 Application |
+| US-201 Verification | US-101 plus external verification provider |
+| US-202 View Verification | US-201 |
+| US-301 Delinquency Detection | Mortgage and payment data availability |
+| US-302 Delinquency Alert | US-301 plus notification service |
+
+Visualize core flow:
+
+```mermaid
+flowchart TD
+    US101[US-101 Create Borrower Profile] --> US102[US-102 Submit Mortgage Application]
+    US102 --> US103[US-103 Upload Documents]
+    US102 --> US201[US-201 Initiate Verification]
+    US201 --> US202[US-202 View Verification Status]
+    PAY[Payment Data] --> US301[US-301 Detect Delinquency]
+    US301 --> US302[US-302 Generate Delinquency Alert]
+```
+
+Enterprise dependency checklist for US-201:
+
+- provider endpoint and credentials;
+- firewall and network approval;
+- API authentication method;
+- data-sharing approval;
+- security review;
+- integration test environment; and
+- provider availability window.
+
+---
+
+## Exercise 9 - Prioritize the backlog
+
+Use priority levels:
+
+- `P0` Critical
+- `P1` High
+- `P2` Medium
+- `P3` Low
+
+Sample prioritization:
+
+| Story | Priority |
+| --- | --- |
+| US-101 Borrower Profile | P0 |
+| US-102 Mortgage Application | P0 |
+| US-103 Document Upload | P1 |
+| US-201 Borrower Verification | P0 |
+| US-202 Verification Status | P1 |
+| US-301 Delinquency Detection | P1 |
+| US-302 Delinquency Alert | P1 |
+
+Prioritization inputs should include business value, risk, dependencies, compliance, customer impact, and delivery sequence.
+
+---
+
+## Exercise 10 - Plan Sprint 1
+
+Assume sprint duration is 2 weeks and capacity is about 18 points.
+
+Sprint 1 goal:
+
+Enable foundational borrower onboarding and initial mortgage application creation.
+
+Include technical stories, not only feature stories.
+
+| ID | Story | Points |
+| --- | --- | ---: |
+| TS-101 | Set up mortgage API project structure | 3 |
+| US-101 | Create borrower profile | 3 |
+| US-102 | Submit mortgage application | 5 |
+| US-103 | Upload mortgage documents | 5 |
+| TS-102 | Implement audit logging baseline | 2 |
+| Total |  | 18 |
+
+Sprint 1 dependency view:
+
+```mermaid
+flowchart TD
+    T1[TS-101 Platform Setup] --> U1[US-101 Borrower Profile]
+    U1 --> U2[US-102 Mortgage Application]
+    U2 --> U3[US-103 Document Upload]
+    A1[TS-102 Audit Logging] --> U1
+    A1 --> U2
+    A1 --> U3
+```
+
+---
+
+## Exercise 11 - Plan Sprint 2
+
+Sprint 2 goal:
+
+Enable borrower verification and initial risk workflow readiness.
+
+| ID | Story | Points |
+| --- | --- | ---: |
+| US-201 | Initiate borrower verification | 8 |
+| US-202 | View verification status | 3 |
+| US-104 | View mortgage application status | 3 |
+| SEC-201 | Secure verification integration | 3 |
+| OPS-201 | Add verification monitoring and logging | 2 |
+| Total |  | 19 |
+
+Sprint 2 depends on Sprint 1 outputs and external readiness:
+
+- verified borrower and application data flow from Sprint 1;
+- verification provider access;
+- network approval;
+- security approval;
+- test environment availability.
+
+---
+
+## Exercise 12 - Build and use a sprint board
+
+Minimum board states:
+
+- Backlog
+- Ready
+- In Progress
+- Code Review
+- Testing
+- Done
+
+Suggested enterprise board states:
+
+- Backlog
+- Ready
+- In Development
+- Code Review
+- QA Testing
+- Security Validation
+- Ready for Acceptance
+- Done
+
+Board movement simulation:
+
+- `TS-101` moves to Done.
+- `US-101` moves to In Progress.
+- `US-102` remains in Ready pending US-101 completion.
+
+Daily scrum simulation should identify blockers and assign explicit follow-up ownership.
+
+---
+
+## Exercise 13 - Handle blocker and scope change
+
+### Enterprise blocker simulation
+
+Blocker example:
+
+`BLOCKER-01 External verification API connectivity approval pending.`
+
+Impact:
+
+`US-201` cannot start full integration.
+
+Mitigation:
+
+- use a mock provider for contract testing;
+- continue internal integration work;
+- track firewall approval independently; and
+- do not mark external integration complete before evidence exists.
+
+### Mid-sprint scope change simulation
+
+Change request example: immediate co-borrower support.
+
+Evaluation criteria:
+
+- sprint goal impact;
+- capacity and commitment;
+- dependency chain;
+- compliance risk;
+- business urgency.
+
+Recommended decision pattern:
+
+Add to product backlog, refine, and plan for Sprint 2 unless essential to current sprint goal.
+
+---
+
+## Exercise 14 - Review and retrospective
+
+### Sprint review output
+
+Demonstrate completed increment for:
+
+- borrower registration;
+- mortgage application creation;
+- document upload;
+- audit logging evidence.
+
+Capture stakeholder feedback and create new backlog items, for example:
+
+`US-104 View Mortgage Application Status`
+
+### Retrospective output
+
+Use three buckets.
+
+- What went well
+- What did not go well
+- Improvement actions
+
+Expected quality bar: each improvement action has an owner and a target sprint.
+
+---
+
+## Capstone activity - Session 4 deliverable
+
+Create a capstone package for the Fannie Mae-style Secondary Mortgage Intelligence Platform.
+
+### Step 1 - Product vision
+
+Build a secure secondary mortgage intelligence platform that supports onboarding, underwriting flow readiness, servicing monitoring, delinquency detection, and operational visibility across the mortgage lifecycle.
+
+### Step 2 - Personas
+
+Minimum persona set:
+
+- Borrower
+- Underwriting Analyst
+- Servicing Specialist
+- Operations Manager
+- Platform Administrator
+
+### Step 3 - Initial epic set
+
+- `EPIC-01` Borrower Onboarding
+- `EPIC-02` Mortgage Application Management
+- `EPIC-03` Borrower Verification
+- `EPIC-04` Underwriting
+- `EPIC-05` Mortgage Servicing
+- `EPIC-06` Delinquency Monitoring
+- `EPIC-07` Analytics and Reporting
+- `EPIC-08` Security and Auditability
+
+### Step 4 - Release alignment
+
+- Sprint 1 release target: `v0.1.0` (Onboarding Foundation)
+- Sprint 2 release target: `v0.2.0` (Verification Foundation)
+
+### Step 5 - Traceability matrix
+
+| Business requirement | Epic | Story | Sprint | Release |
+| --- | --- | --- | --- | --- |
+| Capture borrower profile | Borrower Onboarding | US-101 | Sprint 1 | v0.1.0 |
+| Create application | Mortgage Application Management | US-102 | Sprint 1 | v0.1.0 |
+| Upload supporting evidence | Mortgage Application Management | US-103 | Sprint 1 | v0.1.0 |
+| Verify borrower identity | Borrower Verification | US-201 | Sprint 2 | v0.2.0 |
+| Show verification status | Borrower Verification | US-202 | Sprint 2 | v0.2.0 |
+
+### Step 6 - Governance checkpoints
+
+Document these checkpoints in the release path:
+
+- architecture review;
+- security review;
+- code review;
+- automated testing;
+- security scanning;
+- release approval; and
+- production deployment approval.
+
+### Step 7 - Capstone system view
+
+```mermaid
+flowchart TD
+    V[Product Vision] --> P[Personas]
+    P --> E[Epics]
+    E --> B[Product Backlog]
+    B --> S1[Sprint 1 Onboarding]
+    B --> S2[Sprint 2 Verification]
+    S1 --> R1[Release v0.1.0]
+    S2 --> R2[Release v0.2.0]
+    R1 --> G[Governance Trail]
+    R2 --> G
+```
+
+---
+
+## Final deliverables checklist
+
+Each team should submit:
+
+- product vision statement;
+- persona list;
+- epic backlog (minimum 6-8 epics);
+- user story backlog (minimum 10-15 stories);
+- acceptance criteria for key stories;
+- story-point estimates for Sprint 1 and Sprint 2 items;
+- dependency map including technical and external dependencies;
+- Definition of Ready and Definition of Done;
+- Sprint 1 plan and Sprint 2 plan;
+- sprint board configuration and sample workflow movement; and
+- requirement-to-release traceability matrix.

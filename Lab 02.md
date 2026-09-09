@@ -1,1468 +1,453 @@
-# Lab 02: Network Tracing, Connectivity Troubleshooting, and Secure Mortgage Topology
+# Lab 02: Windows Developer Workstation Readiness
 
 **Audience:** Developers joining the mortgage-platform training  
-**Platform:** Windows 10 (build 19041 or later) or Windows 11  
-**Editor:** VS Code or Notepad (File Explorer to create folders)  
-**Terminal:** Command Prompt, VS Code terminal, or PowerShell (any one can run Python)  
-**Depends on:** Lab 01 workstation readiness (Python, Git for Windows, browser)  
-**Estimated time:** 3 to 3.5 hours, including the capstone  
-**Last reviewed:** 31 August 2026
+**Platform:** Windows 11 (Windows 10 version 2004, build 19041 or later is also supported for WSL)  
+**Shells:** PowerShell and Ubuntu on WSL 2  
+**Estimated time:** 90-120 minutes, excluding software downloads and restarts  
+**Last reviewed:** 27 August 2026
 
 ## Purpose
 
-In this lab you will learn how a mortgage request travels across the network, how to separate network failures from application defects, and how to draft a secure deployment topology. You will:
+In this lab you will prepare and verify a Windows development workstation. You will:
 
-- run a small Windows-hosted mortgage API that simulates PostgreSQL and object storage;
-- trace Browser → API → database → storage;
-- inspect listening ports, DNS, HTTP, TLS, routing, and blocked connectivity;
-- identify trust boundaries and incomplete network architecture; and
-- produce capstone artifacts for the mortgage portal, APIs, AI service, and data layer.
+- confirm the Windows architecture and virtualization prerequisites;
+- install and configure WSL 2 with Ubuntu;
+- create a Linux development workspace and use it from VS Code;
+- verify Git, Java, Python, Docker Desktop, PostgreSQL, and IntelliJ IDEA;
+- create a synthetic PostgreSQL database;
+- configure an SSH key without exposing the private key; and
+- troubleshoot PATH, port, package, and file-permission failures.
 
-Do not change corporate firewall, DNS, or routing policy on a managed workstation. Every connectivity failure in this lab is simulated locally or against public internet names that your organization already permits (`example.com`, `google.com`).
+Do not install software or change system settings if your organization manages the workstation. Use the approved software catalog and request administrator assistance when required.
 
 ## Completion criteria
 
-The lab series is complete when you can show:
+The lab is complete when you can show:
 
-- `http://127.0.0.1:8000/health` returns `"status": "UP"` (use `127.0.0.1`, not `localhost`; see Shared setup);
-- `netstat` or `Get-NetTCPConnection` shows a listener on TCP 8000;
-- a request to port 9000 fails while port 8000 succeeds, and you can explain why;
-- `nslookup` distinguishes a resolvable name from `NXDOMAIN`;
-- `curl.exe -v` output identifies method, host, port, status, headers, and body;
-- a TLS handshake against `https://example.com` shows protocol, certificate, and issuer;
-- `tracert example.com` lists network hops;
-- a marked trust-boundary diagram for the mortgage platform; and
-- capstone deliverables: topology diagram, communication matrix, and security-zone map.
+- `wsl --list --verbose` reports Ubuntu with version `2`;
+- the Linux workspace opens in VS Code with a WSL indicator;
+- `git`, `java`, `javac`, `python`, and `docker` return versions;
+- `docker run --rm hello-world` completes successfully;
+- PostgreSQL accepts a connection and returns the synthetic borrower row;
+- `ssh-add -l` lists the training key; and
+- the permission exercise ends with the file readable by its owner and group.
 
-## How to use this guide
-
-Each hands-on lab is **independent**. You may complete a single lab without finishing the others, provided you meet that lab's **Before you start** section.
-
-Labs 2.1, 2.2, 2.3, 2.5, and 2.7 need a local API on port 8000. Complete **Shared Windows environment setup** once, then leave that API running in a dedicated terminal window. Labs 2.4, 2.6, 2.8, 2.9, and 2.10 do not need the local API.
-
-Keep the API console visible. Log lines such as `Simulating PostgreSQL lookup` are part of the trace.
-
-## Shared Windows environment setup
-
-Complete this section when a lab says the local mortgage API must be running. Skip it if the API is already listening on port 8000.
-
-**You do not need PowerShell to create the project.** Create folders in File Explorer and files in VS Code (or Notepad), the same way you would any local Python app. The only local commands you need after that are `python` / `pip` (to install and run the API). PowerShell is required later only for `Test-NetConnection` (Labs 2.2, 2.3, 2.7). Commands such as `curl.exe`, `netstat`, `nslookup`, and `tracert` also work in **Command Prompt** and the **VS Code terminal**.
-
-### Tools you need
-
-| Tool | How to verify | If missing |
-| --- | --- | --- |
-| File Explorer + VS Code (or Notepad) | You can create a folder and save a `.py` file | Lab 01 VS Code install |
-| Python 3 | `python --version` in Command Prompt, VS Code terminal, or PowerShell | Complete Lab 01 Python setup, or use `py -3 --version` |
-| pip (via Python) | `python -m pip --version` | Reinstall Python with pip enabled |
-| PyPI or internal package index | A successful `pip install` of the requirements file | Instructor proxy / `--index-url`; Labs 2.1–2.3, 2.5, 2.7 cannot start without packages |
-| Web browser | Edge, Chrome, or Firefox | Required for Lab 2.1 and Lab 2.5 |
-| curl (optional; browser can replace it for GET) | `curl.exe --version` | Built into Windows 10/11; if you type `curl` in old PowerShell, use `curl.exe` instead |
-| Git for Windows (optional, for OpenSSL) | `git --version` | Lab 01 install; used only in Lab 2.6 |
-
-If `python` is not found, retry `py -3 --version`. Use **one** interpreter for the whole lab. `python` and `py -3` can be different versions on the same PC. If `python --version` works, keep using `python`.
-
-This setup needs **outbound HTTPS to the Python package index** (or an instructor-provided index). If `pip` cannot download packages, stop and get the organization proxy or `--index-url` from the instructor. Do not continue until `fastapi` and `uvicorn` are installed.
-
-### Create the project manually
-
-Prefer `C:\Projects\mortgage-network-lab` (same root as Lab 01). If Windows will not let you create `C:\Projects`, use `Documents\mortgage-network-lab` instead and use that path in the `cd` commands later. Put the project on the Windows filesystem, not inside WSL.
-
-1. Open **File Explorer**.
-2. Go to `C:\`. Create a folder named `Projects` if it does not already exist.
-3. Open `C:\Projects`. Create a folder named `mortgage-network-lab`.
-4. Open `mortgage-network-lab`. Create two folders named `app` and `storage`.
-5. Open `C:\Projects\mortgage-network-lab` in **VS Code** (**File > Open Folder**). Notepad works if VS Code is not available.
-6. Create a new file named `requirements.txt` in the project root. Paste the two lines below and save (**Ctrl+S**).
+## Architecture and operating model
 
 ```text
-fastapi
-uvicorn
+Windows 11
+|-- PowerShell / Windows Terminal
+|-- Git for Windows
+|-- JDK 25 (or the organization-approved JDK)
+|-- Python (the organization-approved version)
+|-- VS Code
+|-- IntelliJ IDEA
+|-- Docker Desktop
+|-- PostgreSQL (Windows installation for this lab)
+`-- WSL 2
+    `-- Ubuntu
+        |-- Bash, Git, SSH, and Linux utilities
+        `-- ~/projects (Linux-side development workspace)
 ```
 
-7. Create a new file named `main.py` inside the `app` folder. Paste the Python below and save. This service is a **simulation**. It does not connect to a real PostgreSQL instance or to AWS S3. Loan records are in-memory. Uploaded documents are written under `storage\` so you can see the "object store" on disk.
+Keep projects on the filesystem used by the tools that build them. For Linux tools, use `~/projects`; for Windows-only tools, use a Windows path. Accessing `/mnt/c` is useful for interoperability, but cross-filesystem builds can be slower.
 
-```python
-from fastapi import FastAPI, HTTPException
-from datetime import datetime
-from pathlib import Path
+## 1. Verify Windows
 
-app = FastAPI(title="Mortgage Document Service")
+Open **PowerShell** and run:
 
-STORAGE_DIR = Path(__file__).resolve().parent.parent / "storage"
-STORAGE_DIR.mkdir(exist_ok=True)
-
-LOANS = {
-    1001: {
-        "loan_id": 1001,
-        "borrower": "Demo Borrower",
-        "status": "ACTIVE",
-        "amount": 350000,
-    },
-    1002: {
-        "loan_id": 1002,
-        "borrower": "Alex Rivera",
-        "status": "UNDERWRITING",
-        "amount": 275000,
-    },
-}
-
-
-@app.get("/health")
-def health():
-    return {
-        "status": "UP",
-        "service": "mortgage-document-service",
-    }
-
-
-@app.get("/loans/{loan_id}")
-def get_loan(loan_id: int):
-    print(f"[{datetime.now()}] Request received for loan {loan_id}")
-    print("Simulating PostgreSQL lookup")
-    loan = LOANS.get(loan_id)
-    if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
-    return loan
-
-
-@app.post("/loans/{loan_id}/documents/{filename}")
-def store_document(loan_id: int, filename: str):
-    print(f"[{datetime.now()}] Document store request for loan {loan_id}")
-    if loan_id not in LOANS:
-        raise HTTPException(status_code=404, detail="Loan not found")
-    print("Simulating S3 object write")
-    dest = STORAGE_DIR / f"loan-{loan_id}-{filename}"
-    dest.write_text(
-        f"simulated object for loan {loan_id}\nfilename={filename}\n",
-        encoding="utf-8",
-    )
-    return {
-        "loan_id": loan_id,
-        "object_key": dest.name,
-        "storage": "simulated-s3",
-        "status": "STORED",
-    }
+```powershell
+winver
+Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion, OsArchitecture
 ```
 
-8. Confirm this layout in File Explorer or the VS Code explorer:
+**Record:** Windows 10 version 2004/build 19041 or later, Windows 11, and `64-bit` architecture.
+
+Check virtualization support:
+
+```powershell
+systeminfo
+```
+
+Review the **Hyper-V Requirements** section. WSL 2 requires hardware virtualization enabled in firmware and the Windows virtualization components. If the requirements are not met, stop and contact IT; do not change firmware settings without approval.
+
+## 2. Install and verify WSL 2
+
+Open **PowerShell as Administrator** and run:
+
+```powershell
+wsl --install
+```
+
+This enables the required components, installs the WSL kernel, sets WSL 2 as the default, and installs Ubuntu by default. Restart Windows when prompted.
+
+After the restart, launch **Ubuntu** from the Start menu and create a Linux username and password. These credentials are separate from your Windows credentials. Password input is intentionally invisible.
+
+In PowerShell, update WSL and inspect the distribution:
+
+```powershell
+wsl --update
+wsl --status
+wsl --list --verbose
+```
+
+The expected distribution row is similar to:
 
 ```text
-C:\Projects\mortgage-network-lab\
-|-- app\
-|   `-- main.py
-|-- storage\
-`-- requirements.txt
+NAME      STATE      VERSION
+Ubuntu    Stopped    2
 ```
 
-If you used `Documents\mortgage-network-lab`, the files are the same; only the root path changes.
+`Running` is also valid. The state changes as the distribution starts and stops; the important value for this lab is `VERSION 2`.
 
-### Create the virtual environment and install packages
+If Ubuntu is missing, list available distributions and install it explicitly:
 
-These are local **Python** commands, not PowerShell scripts. Run them in **Command Prompt**, the **VS Code terminal** (Terminal > New Terminal), or PowerShell. First `cd` into the project folder.
+```powershell
+wsl --list --online
+wsl --install --distribution Ubuntu
+```
+
+If Ubuntu is version 1, convert it:
+
+```powershell
+wsl --set-version Ubuntu 2
+```
+
+## 3. Configure Ubuntu
+
+Open Ubuntu or enter it from PowerShell:
+
+```powershell
+wsl
+```
+
+Run these commands in the **Ubuntu Bash shell**:
+
+```bash
+whoami
+pwd
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y build-essential curl git jq tree unzip zip openssh-client
+```
+
+Verify the Linux tools:
+
+```bash
+git --version
+curl --version
+tree --version
+```
+
+## 4. Explore Windows/Linux integration
+
+In Ubuntu, Windows drives are mounted below `/mnt`:
+
+```bash
+cd /mnt/c
+ls
+cd /mnt/c/Users
+ls
+```
+
+For example, `C:\Users\<WindowsUser>` is approximately `/mnt/c/Users/<WindowsUser>`. Replace `<WindowsUser>` with the actual Windows profile name; do not copy the example literally.
+
+Return to your Linux home directory and create the training workspace:
+
+```bash
+cd ~
+mkdir -p ~/projects/mortgage-platform
+cd ~/projects/mortgage-platform
+pwd
+```
+
+Expected pattern: `/home/<linux-user>/projects/mortgage-platform`.
+
+## 5. Configure Git in both environments
+
+Git configuration is separate in Windows and WSL. Configure each environment only with your real training identity.
+
+In **PowerShell**:
+
+```powershell
+git --version
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+git config --global --get-regexp "^(user|core)\."
+```
+
+In **Ubuntu**:
+
+```bash
+git --version
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+git config --global --get-regexp '^(user|core)\.'
+```
+
+Use your organization's documented credential manager and line-ending policy when cloning repositories. Do not put access tokens or passwords in Git configuration files.
+
+## 6. Install and verify Java
+
+Java 25 is the current Java SE LTS release as of this lab date. Use JDK 25 unless the course or organization specifies another supported JDK. Use an approved OpenJDK distribution or other approved vendor; licensing and support requirements take precedence over this default.
+
+Install the JDK using the approved Windows software source. Then open a **new PowerShell window** and run:
+
+```powershell
+java --version
+javac --version
+where.exe java
+```
+
+The output must show a JDK installation, not only a JRE. If the training requires `JAVA_HOME`, set it to the JDK home directory, for example:
 
 ```text
-cd C:\Projects\mortgage-network-lab
+C:\Program Files\Java\jdk-25
+```
+
+Do not add quotes to the value. After IT or the installer updates PATH, open a new terminal and verify `java --version` and `javac --version` again.
+
+## 7. Install and verify Python
+
+Install the organization-approved Python version from the approved source. Python version selection is a course dependency and must not be guessed from this document.
+
+In a new **PowerShell** window:
+
+```powershell
+python --version
+py --version
+where.exe python
+python -c "print('Mortgage environment ready')"
+```
+
+Expected output from the last command:
+
+```text
+Mortgage environment ready
+```
+
+Create and test a project virtual environment:
+
+```powershell
+New-Item -ItemType Directory -Force C:\Projects\mortgage-platform | Out-Null
+Set-Location C:\Projects\mortgage-platform
 python -m venv .venv
-.venv\Scripts\python.exe -m pip install --upgrade pip
-.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install requests
+python -m pip show requests
+deactivate
 ```
 
-If `python` is not recognized, replace `python` with `py -3` on the `venv` line only, then keep using `.venv\Scripts\python.exe` for pip.
+If PowerShell blocks activation, do not weaken the machine-wide policy. Use the organization-approved policy or run the environment's Python directly with `\.venv\Scripts\python.exe`.
 
-If pip fails with a connection or proxy error, retry with the instructor-provided proxy or index, for example:
+## 8. Install VS Code and open the WSL workspace
+
+Install VS Code on **Windows**, then install the **WSL** extension. Add the **Python**, **Extension Pack for Java**, and **Docker** extensions only if approved for the training image.
+
+From Ubuntu:
+
+```bash
+cd ~/projects/mortgage-platform
+code .
+```
+
+Verify that the new VS Code window shows a WSL indicator and that a new integrated terminal opens in Ubuntu. Commands and extensions for the remote workspace run in WSL; UI extensions can run locally.
+
+## 9. Configure IntelliJ IDEA
+
+Install IntelliJ IDEA using the approved edition and source. A standalone JDK is required for Java development; the IDE's bundled runtime is not a project JDK.
+
+In IntelliJ IDEA, open **File > Project Structure > Project** and select the approved JDK (JDK 25 unless the course specifies otherwise). Create a small Java project and run:
+
+```java
+public class EnvironmentTest {
+    public static void main(String[] args) {
+        System.out.println("Mortgage developer workstation ready");
+    }
+}
+```
+
+Expected output:
 
 ```text
-.venv\Scripts\python.exe -m pip install -r requirements.txt --proxy http://proxy.contoso.com:8080
+Mortgage developer workstation ready
 ```
 
-Replace the proxy URL with the real training-network value. Do not invent one.
+## 10. Install and verify Docker Desktop
 
-You do not need to activate the virtual environment. Calling `.venv\Scripts\python.exe` uses that environment directly and avoids PowerShell execution-policy problems with `Activate.ps1`.
+Before installing Docker Desktop, remove any separately installed Docker Engine or Docker CLI inside Ubuntu if present. Two engines can conflict.
 
-### Start the API
+Install the current Docker Desktop for Windows using the approved source. In Docker Desktop, confirm **Settings > General > Use WSL 2 based engine** when that option is available. Under **Settings > Resources > WSL Integration**, enable the Ubuntu distribution used by this lab.
 
-Before starting, confirm port 8000 is free. If another process is already `LISTENING`, uvicorn will fail. In Command Prompt, VS Code terminal, or PowerShell:
+Run the following in **PowerShell** and then in **Ubuntu**:
 
 ```text
-netstat -ano | findstr :8000
+docker version
+docker run --rm hello-world
 ```
 
-If you see `LISTENING`, note the PID (last column). Confirm it is an old Python/uvicorn process in Task Manager, then stop it with:
+The command must print the hello-world success message. Do not install a second Docker Engine inside Ubuntu when Docker Desktop WSL integration is enabled.
 
-```text
-taskkill /PID <PID> /F
-```
+## 11. Install and verify PostgreSQL
 
-Replace `<PID>` with the number from `netstat`. Do not stop unrelated processes.
+Install PostgreSQL and the command-line tools using the approved installer. Install pgAdmin only if it is part of the training image. Choose a strong local training password and store it only in the approved password manager; never use a shared or production password.
 
-Use a **dedicated** terminal window (leave it open while you work through the labs):
-
-```text
-cd C:\Projects\mortgage-network-lab
-.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-`--host 127.0.0.1` binds **IPv4 loopback only**. On Windows, `localhost` often resolves to IPv6 `::1` first. A browser request to `http://localhost:8000` can fail even while the API is healthy. Always use `http://127.0.0.1:8000`. Do not use `0.0.0.0` on a managed training workstation unless the instructor asks you to.
-
-Wait until the console shows startup. Do not call the API before this line appears:
-
-```text
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     Application startup complete.
-```
-
-Windows Defender Firewall may prompt the first time Python listens on a port. Allow access on **private** networks only, or cancel and keep the bind on `127.0.0.1` so no inbound firewall rule is required. If `--reload` later leaves the port occupied after `Ctrl+C`, use the Stop the API steps below.
-
-### Confirm the API is up
-
-Open a browser (no terminal required):
-
-```text
-http://127.0.0.1:8000/health
-```
-
-You should see JSON with `"status":"UP"`. Optional check from a **second** terminal:
-
-```text
-curl.exe http://127.0.0.1:8000/health
-```
-
-Expected body:
-
-```text
-{"status":"UP","service":"mortgage-document-service"}
-```
-
-### Stop the API
-
-In the API window press `Ctrl+C`. Confirm the port is free:
-
-```text
-netstat -ano | findstr :8000
-```
-
-No `LISTENING` row should remain. If a process is stuck, note the PID and stop only that process:
-
-```text
-taskkill /PID <PID> /F
-```
-
----
-
-## Lab 2.1 — Trace Browser → API → Database → Cloud Storage
-
-**Time:** 25 minutes  
-**Needs local API:** Yes
-
-### Description
-
-You run a small FastAPI service that represents the mortgage document service. A browser (or `curl.exe`) is the client. The service looks up a loan in a simulated PostgreSQL store and writes a simulated object into local `storage\`. The goal is to see every hop, not to build the production platform.
-
-### Business scenario
-
-A loan officer opens the mortgage portal and requests loan **1001**. The portal calls the document service. Underwriting also stores `income-proof.pdf` against that loan. When this path breaks in production, teams often jump to "the API is buggy." This lab shows the real chain: client → TCP → application → data store → object storage.
-
-### Before you start
-
-Complete **Shared Windows environment setup** and leave uvicorn running on port 8000.
-
-### Architecture
-
-```text
-Browser or curl.exe
-        |
-        | HTTP  (TCP 127.0.0.1:8000)
-        v
-Python FastAPI  (mortgage-document-service)
-        |
-        +------------------+
-        |                  |
-        v                  v
-Simulated PostgreSQL    Simulated S3
-(in-memory LOANS)       (C:\Projects\mortgage-network-lab\storage)
-```
-
-### Steps
-
-1. Confirm the service is healthy. In the browser address bar, open:
-
-   ```text
-   http://127.0.0.1:8000/health
-   ```
-
-   You should see JSON with `"status":"UP"`.
-
-2. Request a loan that exists. Open:
-
-   ```text
-   http://127.0.0.1:8000/loans/1001
-   ```
-
-   Expected fields include `loan_id`, `borrower`, `status`, and `amount`.
-
-3. Watch the API terminal window. You should see lines similar to:
-
-   ```text
-   Request received for loan 1001
-   Simulating PostgreSQL lookup
-   ```
-
-   That printout is the "database hop." The browser never talks to PostgreSQL directly.
-
-4. Repeat from a second terminal (Command Prompt, VS Code terminal, or PowerShell) so you can script the same call later:
-
-   ```powershell
-   curl.exe http://127.0.0.1:8000/loans/1001
-   ```
-
-5. Simulate object storage. Store a document metadata object for the same loan:
-
-   ```powershell
-   curl.exe -X POST http://127.0.0.1:8000/loans/1001/documents/income-proof.pdf
-   ```
-
-   Expected JSON includes `"storage":"simulated-s3"` and `"status":"STORED"`.
-
-6. Prove the object landed on disk:
-
-   ```powershell
-   Get-ChildItem C:\Projects\mortgage-network-lab\storage
-   Get-Content C:\Projects\mortgage-network-lab\storage\loan-1001-income-proof.pdf
-   ```
-
-7. Request a loan that does not exist and confirm the application (not the network) returns an error:
-
-   ```powershell
-   curl.exe -i http://127.0.0.1:8000/loans/9999
-   ```
-
-   Expected HTTP status: `404`. The TCP connection succeeded; the application rejected the loan id.
-
-8. Draw the successful path in your notes:
-
-   ```text
-   curl.exe / browser
-        |
-        | TCP 127.0.0.1:8000
-        v
-   FastAPI
-        |
-        | in-process lookup
-        v
-   Simulated PostgreSQL (memory)
-        |
-        | file write
-        v
-   Simulated S3 (storage\ folder)
-        |
-        v
-   JSON response to client
-   ```
-
-### Expected result
-
-You can point to three distinct stages in one request: network delivery to port 8000, application processing, and data/storage side effects. A 404 on an unknown loan is an application result, not a connectivity failure.
-
----
-
-## Lab 2.2 — Inspect Network Connections
-
-**Time:** 15 minutes  
-**Needs local API:** Yes
-
-### Description
-
-You identify which process is listening on TCP 8000 and prove that the workstation can open a connection to that port. This is the first question in production when a client reports "connection refused" or "timed out."
-
-### Business scenario
-
-The mortgage portal cannot load loan 1001. The document-service team says "the API is running." You must verify that a listener exists on the expected port and that a local client can complete a TCP handshake, without guessing.
-
-### Before you start
-
-The API from Shared setup must be running. If you are unsure:
+In **PowerShell**:
 
 ```powershell
-curl.exe http://127.0.0.1:8000/health
+psql --version
+Get-Service | Where-Object { $_.Name -like "*postgres*" }
 ```
 
-If that fails, complete **Shared Windows environment setup**.
+If `psql` is not found, locate the approved PostgreSQL `bin` directory and use the organization's PATH procedure. Do not edit PATH until you understand which installation is active.
 
-### Steps
+## 12. Create a synthetic mortgage database
 
-1. List TCP connections and listeners:
-
-   ```powershell
-   netstat -ano
-   ```
-
-   Output is long. You will filter it in the next step.
-
-2. Find port 8000:
-
-   ```powershell
-   netstat -ano | findstr :8000
-   ```
-
-   Expected: a row containing `LISTENING` and `127.0.0.1:8000` (or `0.0.0.0:8000` if the bind host was changed). The last column is the process ID (PID).
-
-3. Optional modern equivalent:
-
-   ```powershell
-   Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue |
-       Select-Object LocalAddress, LocalPort, State, OwningProcess
-   ```
-
-   Expected `State`: `Listen`.
-
-4. Map the PID to a process name:
-
-   ```powershell
-   netstat -ano | findstr :8000
-   Get-Process -Id <PID> | Select-Object Id, ProcessName, Path
-   ```
-
-   Replace `<PID>` with the number from step 2. You should see `python` or `uvicorn`.
-
-5. Test whether a client can connect. `Test-NetConnection` can take 20–40 seconds, especially when the port is closed. Wait for it; do not assume the shell is frozen.
-
-   ```powershell
-   Test-NetConnection -ComputerName 127.0.0.1 -Port 8000
-   ```
-
-   Expected: `TcpTestSucceeded : True`. `PingSucceeded` may be `False` on some images; ICMP is not required for this lab. The TCP result is the one that matters.
-
-   Faster alternative if `Test-NetConnection` is too slow:
-
-   ```powershell
-   $tcp = New-Object System.Net.Sockets.TcpClient
-   try {
-       $ok = $tcp.ConnectAsync("127.0.0.1", 8000).Wait(2000)
-       Write-Host "TcpConnectSucceeded : $ok"
-   } finally {
-       $tcp.Dispose()
-   }
-   ```
-
-### What `LISTENING` means
-
-`LISTENING` means an application has bound the port and is waiting for inbound TCP connections. It does not prove that HTTP, TLS, or business logic work. It only proves the network socket is open.
-
-### Expected result
-
-You can name the PID, the process, the port, and a successful `Test-NetConnection` result. Record these values in your notes; Labs 2.3 and 2.7 compare against them.
-
----
-
-## Lab 2.3 — Simulate the Wrong Port
-
-**Time:** 15 minutes  
-**Needs local API:** Yes
-
-### Description
-
-You send a healthy client to the wrong port on purpose. The application code is unchanged. The failure is a network-endpoint mistake, which is a common mortgage-portal configuration error (wrong base URL, wrong load-balancer target group, stale port in a secret).
-
-### Business scenario
-
-A new environment variable sets the document service URL to `http://localhost:9000` after a copy-paste from an old runbook. Borrowers see "unable to load loan." Developers start debugging FastAPI handlers. You must show that the process is healthy on 8000 and that 9000 has no listener.
-
-### Before you start
-
-API listening on 8000 (Shared setup). Confirm:
+Connect with the local training account. PowerShell will prompt for the password; do not place it in the command line or in this file.
 
 ```powershell
-Test-NetConnection -ComputerName 127.0.0.1 -Port 8000
+psql -U postgres -h localhost -d postgres
 ```
 
-`TcpTestSucceeded` must be `True`. `Test-NetConnection` may take 20–40 seconds; wait for it.
-
-### Steps
-
-1. Call the correct health endpoint so you have a baseline:
-
-   ```powershell
-   curl.exe http://127.0.0.1:8000/health
-   ```
-
-2. Call the **wrong** port with the same path:
-
-   ```powershell
-   curl.exe http://127.0.0.1:9000/health
-   ```
-
-   Expected: connection failure. Typical messages include `Failed to connect` or `Connection refused`. This is **not** an HTTP 500 from FastAPI. No HTTP response is returned because TCP never completed.
-
-3. Prove nothing is listening on 9000:
-
-   ```powershell
-   netstat -ano | findstr :9000
-   Test-NetConnection -ComputerName 127.0.0.1 -Port 9000
-   ```
-
-   Expected: no `LISTENING` row, and `TcpTestSucceeded : False`.
-
-4. Compare side by side:
-
-   ```powershell
-   Test-NetConnection -ComputerName 127.0.0.1 -Port 8000
-   Test-NetConnection -ComputerName 127.0.0.1 -Port 9000
-   ```
-
-5. Answer these questions in your notes (write the answers; do not only discuss them):
-
-   | Question | Answer you should reach |
-   | --- | --- |
-   | Is the FastAPI handler wrong? | No. The process on 8000 still returns `/health`. |
-   | Did HTTP reach the application on 9000? | No. There is no listener. |
-   | What should the portal URL use? | Host `127.0.0.1` (or `localhost`) and port `8000`. |
-
-### Expected result
-
-You can separate **wrong endpoint** from **application defect**. In operations terms: fix configuration, DNS, or load-balancer targets before opening the Python debugger.
-
----
-
-## Lab 2.4 — DNS Investigation
-
-**Time:** 15 minutes  
-**Needs local API:** No
-
-### Description
-
-You resolve a public name that should succeed and a name that must fail. DNS happens before TCP. If the name does not resolve, the mortgage API is never reached, and application logs stay empty.
-
-### Business scenario
-
-The portal is configured with `https://api.mortgage.local/loans/1001`. After a DNS change, borrowers see a generic upload or load failure. The document-service pods are healthy. You must check name resolution first, exactly as you will in the mini exercise later.
-
-### Before you start
-
-Outbound DNS must be allowed from the training workstation (standard Lab 01 image). You do not need uvicorn for this lab.
-
-### Steps
-
-1. Resolve a known public name (same host used later for TLS and traceroute):
-
-   ```powershell
-   nslookup example.com
-   ```
-
-   Expected: a non-authoritative or authoritative answer with one or more IP addresses. Record the DNS server address shown in `Server:`. If `example.com` is blocked by policy, use another instructor-approved public name. Do not use an internal hostname for this step.
-
-2. Optional: see what Windows itself will use for the connection:
-
-   ```powershell
-   Resolve-DnsName example.com | Select-Object Name, Type, IPAddress
-   ```
-
-3. Resolve a name that does not exist. Use the reserved `.invalid` TLD so Windows does not wait on multicast `.local` (mDNS/LLMNR), which can hang for tens of seconds:
-
-   ```powershell
-   nslookup mortgage-api-invalid.invalid
-   ```
-
-   Expected: failure such as `Non-existent domain` / `NXDOMAIN`. No usable A/AAAA record.
-
-4. Confirm PowerShell agrees:
-
-   ```powershell
-   Resolve-DnsName mortgage-api-invalid.invalid -ErrorAction SilentlyContinue
-   ```
-
-   You should get no successful A record. If the cmdlet throws, that is the same outcome: the name does not resolve.
-
-5. Draw the failure:
-
-   ```text
-   Mortgage portal (browser)
-           |
-           | needs IP for api host
-           v
-   DNS resolution
-           X  NXDOMAIN
-           |
-           (request never reaches the API)
-   ```
-
-6. Write one operational rule in your notes: **empty API logs plus a client error often means the client never arrived; check DNS before code.**
-
-### Expected result
-
-You can distinguish "name resolved to an IP" from "NXDOMAIN." You did not need to start or stop the local API to prove this.
-
----
-
-## Lab 2.5 — HTTP Inspection
-
-**Time:** 20 minutes  
-**Needs local API:** Yes
-
-### Description
-
-You capture the HTTP request line, headers, and response for the health endpoint, then exercise the same API through FastAPI's Swagger UI. This is how you confirm that TCP worked and that the application protocol is HTTP as expected (not TLS-only, not a proxy error page).
-
-### Business scenario
-
-A partner integration posts loan documents to the document service. Their support ticket includes only "it failed." You need method, URL, status code, and response body to decide whether the problem is auth, path, payload, or network.
-
-### Before you start
-
-API on port 8000 (Shared setup). Confirm `/health` works.
-
-### Steps
-
-1. Send a verbose GET. `curl.exe -v` writes request and response details to the console:
-
-   ```powershell
-   curl.exe -v http://127.0.0.1:8000/health
-   ```
-
-2. In the output, identify and write down:
-
-   | Item | Where to look | Example |
-   | --- | --- | --- |
-   | Method | Request line starting with `>` | `GET` |
-   | Host | `Host:` header | `127.0.0.1:8000` |
-   | Port | Host header or URL | `8000` |
-   | Request target | Request line | `/health` |
-   | Response status | Line starting with `< HTTP/` | `200` |
-   | Response headers | Lines starting with `<` | `content-type: application/json` |
-   | Response body | After the headers | `{"status":"UP",...}` |
-
-3. Inspect a business GET the same way:
-
-   ```powershell
-   curl.exe -v http://127.0.0.1:8000/loans/1001
-   ```
-
-4. Inspect a missing loan so you can recognize an application HTTP error (connection succeeded, status is 404):
-
-   ```powershell
-   curl.exe -v http://127.0.0.1:8000/loans/9999
-   ```
-
-5. Open the interactive docs in the browser:
-
-   ```text
-   http://127.0.0.1:8000/docs
-   ```
-
-   FastAPI loads Swagger UI from a public CDN. On a locked-down or offline training network the page can be **blank** even though the API is healthy. If that happens, skip the UI and use:
-
-   ```text
-   http://127.0.0.1:8000/openapi.json
-   ```
-
-   plus the `curl.exe -v` commands above. That is a complete Lab 2.5. Do not spend time debugging CSS/JavaScript when `/health` already returns 200.
-
-6. If Swagger UI loaded, expand `GET /health`, choose **Try it out**, then **Execute**. Confirm status `200` and the JSON body.
-
-7. If Swagger UI loaded, execute `GET /loans/{loan_id}` with `loan_id` = `1001`, then again with `9999`. Compare 200 and 404 in the UI.
-
-8. Optional: PowerShell equivalent without `curl.exe`:
-
-   ```powershell
-   Invoke-WebRequest -Uri http://127.0.0.1:8000/health -UseBasicParsing |
-       Select-Object StatusCode, StatusDescription, Content
-   ```
-
-### Expected result
-
-You can read a verbose HTTP trace and map it to method, host, port, status, headers, and body. You can drive the same operations from Swagger UI.
-
----
-
-## Lab 2.6 — TLS Handshake
-
-**Time:** 20 minutes  
-**Needs local API:** No
-
-### Description
-
-The local lab API is HTTP on loopback. Production mortgage traffic is HTTPS. You inspect a real TLS handshake against `example.com` using Windows-native tools. You do not disable certificate validation, and you do not target internal corporate hosts.
-
-### Business scenario
-
-The borrower portal loads, but the document API call fails with a certificate or TLS error after a load-balancer certificate rotation. You must know what a normal handshake looks like: TCP, then TLS, then HTTP.
-
-### Before you start
-
-Outbound HTTPS to `example.com` must be allowed. You do not need uvicorn. Git for Windows (Lab 01) provides `openssl.exe` if it is not already on PATH.
-
-### Steps
-
-1. Observe HTTPS with verbose curl (TLS plus HTTP):
-
-   ```powershell
-   curl.exe -v https://example.com
-   ```
-
-   Look for lines that mention the TLS protocol (for example `TLSv1.2` or `TLSv1.3`), the server certificate, and `SSL certificate verify ok`. Then look for `HTTP/` and a `200` or `301`/`302` status. Record:
-
-   - TLS version  
-   - that certificate verification succeeded  
-   - HTTP status  
-
-2. Locate OpenSSL from Git for Windows if `openssl` is not on PATH:
-
-   ```powershell
-   openssl version
-   Get-Command openssl -ErrorAction SilentlyContinue
-   Test-Path "C:\Program Files\Git\usr\bin\openssl.exe"
-   ```
-
-   If `openssl version` works, use `openssl` in the next command. Otherwise call Git's binary:
-
-   ```powershell
-   & "C:\Program Files\Git\usr\bin\openssl.exe" version
-   ```
-
-3. Inspect the certificate and cipher. OpenSSL waits for keyboard input. Pipe `Q` so the command exits instead of appearing hung:
-
-   ```powershell
-   cmd /c "echo Q | openssl s_client -connect example.com:443 -servername example.com"
-   ```
-
-   Or:
-
-   ```powershell
-   cmd /c "echo Q | ""C:\Program Files\Git\usr\bin\openssl.exe"" s_client -connect example.com:443 -servername example.com"
-   ```
-
-   Git's OpenSSL does **not** use the Windows certificate store. A `Verify return code: 20 (unable to get local issuer certificate)` is common and is **not** a failed lab if `curl.exe -v` already showed Schannel verification. Record Protocol, subject, issuer, and cipher from the OpenSSL dump anyway.
-
-   In the output, locate:
-
-   | Item | Typical heading or field |
-   | --- | --- |
-   | TLS version | `Protocol` or `TLSv1.x` |
-   | Server certificate | `-----BEGIN CERTIFICATE-----` block and subject |
-   | Issuer | `issuer=` |
-   | Cipher | `Cipher` or `Cipher is` |
-
-4. If OpenSSL is not installed and you cannot add it, use .NET on Windows to print protocol and issuer (read-only inspection):
-
-   ```powershell
-   $hostName = "example.com"
-   $tcp = New-Object System.Net.Sockets.TcpClient($hostName, 443)
-   $ssl = New-Object System.Net.Security.SslStream($tcp.GetStream(), $false, { param($s, $c, $ch, $e) $true })
-   $ssl.AuthenticateAsClient($hostName)
-   [PSCustomObject]@{
-       Protocol     = $ssl.SslProtocol
-       Cipher       = $ssl.CipherAlgorithm
-       CertSubject  = $ssl.RemoteCertificate.Subject
-       CertIssuer   = $ssl.RemoteCertificate.Issuer
-       NotAfter     = ([System.Security.Cryptography.X509Certificates.X509Certificate2]$ssl.RemoteCertificate).NotAfter
-   }
-   $ssl.Dispose()
-   $tcp.Close()
-   ```
-
-   The callback `{ ... $true }` is only for this inspection script so you can still print the certificate when a local trust store is incomplete. Do not copy that pattern into application code. Production services must validate certificates.
-
-5. Draw the order:
-
-   ```text
-   Client
-     |
-     TCP handshake  (port 443)
-     |
-     TLS handshake  (certificates, cipher, protocol)
-     |
-     Encrypted HTTP request
-     |
-   Server
-   ```
-
-   HTTP in Lab 2.5 skipped the TLS box. Production mortgage APIs must not.
-
-### Expected result
-
-You can name TLS version, certificate subject, issuer, and cipher (or .NET equivalents) for `example.com`, and you can explain why TCP success is not enough if TLS fails.
-
----
-
-## Lab 2.7 — Simulate Firewall and Connectivity Failure
-
-**Time:** 20 minutes  
-**Needs local API:** Yes (for the working comparison only)
-
-### Description
-
-You do not change Windows Firewall or corporate rules. You compare a port that is listening (8000) with a port that is closed (9999). The closed port behaves like a firewall drop or a missing security-group rule: the client cannot complete TCP.
-
-### Business scenario
-
-After a network change, the mortgage portal can resolve `api.mortgage.local` but document upload still fails. DNS is fine. The runbook next step is "is the port open from this source?" You practice that test safely on localhost.
-
-### Before you start
-
-API on 8000 for the success case. Port 9999 must **not** be used by another training process. If something already listens on 9999, pick another high port (for example 9998) and use it consistently.
-
-### Steps
-
-1. Verify the known-good service:
-
-   ```powershell
-   Test-NetConnection -ComputerName 127.0.0.1 -Port 8000
-   curl.exe http://127.0.0.1:8000/health
-   ```
-
-   Expected: `TcpTestSucceeded : True` and HTTP 200.
-
-2. Test a port with no listener (simulated block / missing allow rule). Allow 20–40 seconds for `Test-NetConnection` to finish:
-
-   ```powershell
-   Test-NetConnection -ComputerName 127.0.0.1 -Port 9999
-   ```
-
-   Expected: `TcpTestSucceeded : False`. On localhost this is usually immediate "connection refused." Across a real firewall you might instead see a timeout. Both mean the client did not establish TCP to an application.
-
-3. Confirm with netstat:
-
-   ```powershell
-   netstat -ano | findstr :9999
-   ```
-
-   Expected: no `LISTENING` row.
-
-4. Optional: see how `curl.exe` reports the same failure:
-
-   ```powershell
-   curl.exe -v --connect-timeout 5 http://127.0.0.1:9999/health
-   ```
-
-5. Copy this troubleshooting sequence into your notes. Use it in the mini exercise and on the job:
-
-   ```text
-   API call failed
-        |
-        v
-   Can DNS resolve the host?
-        |
-        v
-   Can the destination IP be reached (routing)?
-        |
-        v
-   Is the required port open from this source?
-        |
-        v
-   Does TLS succeed (for HTTPS)?
-        |
-        v
-   Did HTTP reach the application?
-        |
-        v
-   What status code and body did the application return?
-   ```
-
-   Stop at the first failed step. Do not debug Python while DNS or TCP is failing.
-
-### Expected result
-
-You have a side-by-side True/False TCP test and a written order of investigation. You did not modify Windows Firewall.
-
----
-
-## Lab 2.8 — Trace Route
-
-**Time:** 10 minutes  
-**Needs local API:** No
-
-### Description
-
-You list the routers (hops) between your Windows workstation and a public host. This introduces routing without configuring enterprise routers. Some hops may show `Request timed out` if a router does not reply to traceroute probes; later hops can still succeed.
-
-### Business scenario
-
-A partner bank's API is slow or unreachable from the office network but works from a cloud jump host. Traceroute shows where packets stop or where latency jumps. You practice the Windows command so you can capture that evidence.
-
-### Before you start
-
-Outbound ICMP/UDP traceroute to `example.com` should be allowed. If your organization blocks traceroute, record that the command is blocked and continue with the explanation. You do not need uvicorn.
-
-### Steps
-
-1. Run the Windows traceroute:
-
-   ```powershell
-   tracert example.com
-   ```
-
-   Do not use `traceroute`; that name is for Linux/macOS.
-
-2. Optional timeout cap if the command runs too long:
-
-   ```powershell
-   tracert -d -h 15 example.com
-   ```
-
-   `-d` skips reverse DNS lookups. `-h 15` limits hops.
-
-3. In the output, identify:
-
-   - hop number  
-   - round-trip times (three probes)  
-   - hostname or IP of that hop, or `Request timed out`  
-
-4. Write one sentence in your notes: packets can cross many networks before they reach the mortgage API; a failure can be in a hop you do not own.
-
-### Expected result
-
-You have a hop list for `example.com` (or a documented corporate block) and you can explain why traceroute is evidence for routing, not for HTTP status codes.
-
----
-
-## Lab 2.9 — Analyze Secure Network Architecture
-
-**Time:** 20 minutes  
-**Needs local API:** No  
-**Type:** Architecture review (diagram and written findings)
-
-### Description
-
-You review a first-draft mortgage architecture and list what is missing. There is no server to start. The deliverable is a short written critique plus an improved zone sketch.
-
-### Business scenario
-
-A vendor proposes this topology for the mortgage platform "to go live next quarter." Security architecture asks you to review it before procurement. Your job is to find exposure, missing zones, and missing controls—not to implement AWS in this lab.
-
-### Given architecture
-
-```text
-                    INTERNET
-                       |
-                       |
-                      WAF
-                       |
-                       v
-                Load Balancer
-                       |
-              -------------------
-              |                 |
-             API-1             API-2
-              |                 |
-              --------+----------
-                      |
-                   Database
-                      |
-                     S3
+Run this SQL at the `postgres=#` prompt:
+
+```sql
+CREATE DATABASE mortgage_platform;
+\c mortgage_platform
+CREATE TABLE borrowers (
+    borrower_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    borrower_reference varchar(50) NOT NULL,
+    status varchar(30) NOT NULL
+);
+INSERT INTO borrowers (borrower_reference, status)
+VALUES ('BORROWER-1001', 'ACTIVE');
+SELECT * FROM borrowers;
 ```
 
-### Steps
+The query must return the one synthetic row. Exit with `\q`. This lab must use synthetic data only; never enter real borrower PII.
 
-1. Copy the diagram into your notes (or a whiteboard photo).
+## 13. Configure an SSH key safely
 
-2. Mark what is unspecified. At minimum call out:
+In Ubuntu, generate a key for the approved Git platform. Use a passphrase unless policy explicitly says otherwise:
 
-   - no DNS / Route 53 (or equivalent) in front of the WAF  
-   - no public vs private subnet labels  
-   - no statement that the database is private  
-   - APIs appear adjacent to the internet path with no private application subnet  
-   - S3 access path and permissions are not shown  
-   - no monitoring, no identity, no encryption-in-transit labels  
-   - no availability-zone redundancy story beyond two API boxes  
-
-3. Answer: **What is wrong or incomplete?** Write at least five findings. Example directions (use your own wording):
-
-   - Database must not be reachable from the internet.  
-   - Application instances belong in private subnets; only the load balancer should sit on a public path.  
-   - Object storage needs a locked-down access pattern (no public bucket, least-privilege identity).  
-   - WAF without a defined public entry (DNS) and without logging is incomplete.  
-   - Two APIs sharing one database still need backup, Multi-AZ, and a data subnet boundary.  
-
-4. Draw the improved sketch:
-
-   ```text
-   Public subnet
-        |
-   Load balancer (and WAF / DNS at the edge)
-        |
-   Private application subnet
-        |
-   Mortgage APIs
-        |
-   Private data subnet
-        |
-   PostgreSQL
-
-   Document service --> S3 with tightly scoped identity and private access
-   ```
-
-5. Note one sentence on S3: use least-privilege credentials or a role, encrypt objects, and avoid public ACLs. You are not creating an AWS account in this lab.
-
-### Expected result
-
-A written list of gaps and a second diagram that introduces public edge, private app, and private data layers.
-
----
-
-## Lab 2.10 — Identify Trust Boundaries
-
-**Time:** 20 minutes  
-**Needs local API:** No  
-**Type:** Architecture review
-
-### Description
-
-You mark trust boundaries on the mortgage request path and answer four control questions at each boundary. Trust boundaries are where the network, identity, or data sensitivity changes—not merely where a box is drawn.
-
-### Business scenario
-
-Internal audit asks: "Who can reach underwriting data, and how do we know?" You cannot answer with a single VPC diagram. You need labeled boundaries and controls for authentication, allowed protocols, and monitoring.
-
-### Given path
-
-```text
-Internet
-   |
-   v
-Mortgage Portal
-   |
-   v
-Mortgage API
-   |
-   +-------> AI Service
-   |
-   +-------> PostgreSQL
-   |
-   +-------> S3
+```bash
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+ssh-keygen -t ed25519 -C "your.email@example.com" -f ~/.ssh/id_ed25519
+chmod 600 ~/.ssh/id_ed25519
+chmod 644 ~/.ssh/id_ed25519.pub
+ls -la ~/.ssh
 ```
 
-### Steps
+The private key is `~/.ssh/id_ed25519`; the public key is `~/.ssh/id_ed25519.pub`. Upload only the public key to the approved Git platform. Inspect it without exposing the private key:
 
-1. Redraw the path with these boundaries:
-
-   ```text
-   [UNTRUSTED]
-   Internet
-       |
-   ==== TRUST BOUNDARY #1 ====
-       |
-   Edge / WAF / public portal entry
-       |
-   ==== TRUST BOUNDARY #2 ====
-       |
-   Application services (portal BFF, mortgage API, document API)
-       |
-   ==== TRUST BOUNDARY #3 ====
-       |
-   Sensitive data and high-risk processors
-   (PostgreSQL, S3, AI service with loan content)
-   ```
-
-2. For **each** of the three boundaries, write answers to all four questions:
-
-   | Question | What a complete answer includes |
-   | --- | --- |
-   | Who can cross it? | Named actors: anonymous borrowers, authenticated staff, platform services, admins |
-   | How are they authenticated? | TLS, WAF, portal login, service identity, IAM/role, mTLS as applicable |
-   | What communication is permitted? | Ports, protocols, directions (for example internet → 443 only) |
-   | How is the activity monitored? | WAF logs, access logs, application traces, data-plane audit |
-
-3. Mark the AI service carefully. It processes borrower content. Treat it as crossing into a higher-sensitivity zone even if it is "just another microservice."
-
-4. Optional prompt for discussion: an engineer says "it is inside the VPC, so it is trusted." Write why Lab 2.10 and the capstone Zero Trust step reject that assumption.
-
-### Expected result
-
-Three numbered boundaries, each with four written answers. This sheet is reused in the capstone security-zone activity.
-
----
-
-## Mini exercise — Mortgage document upload failure
-
-**Time:** 25 minutes  
-**Needs local API:** No (tabletop troubleshooting)  
-**Type:** Guided incident, Windows commands as you would run them in a real environment
-
-### Description
-
-You walk a failed borrower upload using the same order you wrote in Lab 2.7. Several steps are **scripted results** (you will not have a real `api.mortgage.local` in DNS). Run the commands that are valid on your workstation, and treat the stated results as the incident data.
-
-### Business scenario
-
-A borrower attempts to upload `income-proof.pdf`. The UI shows: **Document upload failed.**
-
-```text
-Browser
-   |
-api.mortgage.local
-   |
-WAF
-   |
-Document API
-   |
-S3
+```bash
+cat ~/.ssh/id_ed25519.pub
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519
+ssh-add -l
 ```
 
-### Step 1 — DNS
+Do not paste the private key into chat, tickets, repositories, or screenshots. Use the Git platform's documented host-key verification and connection-test command when you are ready to connect.
 
-On a real incident you would run:
+## 14. Troubleshooting exercises
+
+### PATH diagnosis
+
+In PowerShell, use:
 
 ```powershell
-nslookup api.mortgage.local
+where.exe java
+$env:JAVA_HOME
+$env:Path -split ";"
 ```
 
-**Incident result (given):** `NXDOMAIN` / non-existent domain.
+The first matching executable on PATH is selected. After correcting an installation or PATH entry, close all affected terminals, open a new one, and repeat the version check.
 
-**Problem 1:** The name does not resolve. The Document API is never contacted. Application logs on the API will not show the upload.
-
-**Remediation (given, after DNS is corrected):**
-
-```text
-api.mortgage.local  -->  10.0.2.25
-```
-
-Retry the upload. It still fails. Continue; DNS is no longer the blocker.
-
-To practice the **success** shape of DNS on your machine, resolve a real name and contrast it with the NXDOMAIN you already saw in Lab 2.4:
+For Python, compare:
 
 ```powershell
-nslookup example.com
-nslookup mortgage-api-invalid.invalid
+where.exe python
+python --version
+py --list
 ```
 
-### Step 2 — Connectivity
+### Port diagnosis
 
-Do **not** use `Test-NetConnection 127.0.0.1 -Port 443` as a stand-in for the document API. Local port 443 may already be in use (IIS, VPN, developer tools) and would give a false “success.”
-
-On a real incident, after DNS works, you would test the API name:
+If PostgreSQL cannot bind to port 5432:
 
 ```powershell
-Test-NetConnection -ComputerName api.mortgage.local -Port 443
+Get-NetTCPConnection -LocalPort 5432 -ErrorAction SilentlyContinue |
+    Select-Object LocalAddress, LocalPort, State, OwningProcess
 ```
 
-You cannot complete that command successfully in this classroom (the name is not in your DNS). Treat the following as **incident data**, not as something to reproduce on your PC.
+Then inspect the owning process:
 
-**Incident result (given):** `TcpTestSucceeded : False`.
-
-DNS is fixed; TCP to 443 is not. Next: firewall / security group / NSG policy, not Python.
-
-**Incident policy (given):**
-
-| Field | Current | Required |
-| --- | --- | --- |
-| Source | Portal network | Portal network |
-| Destination | Document API | Document API |
-| Port | 443 | 443 |
-| Action | DENY | ALLOW |
-
-Required rule (logical, not to be implemented on your PC):
-
-```text
-Portal --> Document API
-TCP 443
-ALLOW
+```powershell
+Get-Process -Id <PID>
 ```
 
-Do not add Windows Firewall rules to "simulate" this allow. On a managed workstation that is out of scope.
+Replace `<PID>` with the numeric process ID. Do not stop a process owned by another user or service without approval. The same method applies to ports 8080, 3000, and 5000.
 
-### Step 3 — Confirm the rest of the path (given after remediation)
+### Linux package diagnosis
 
-After the approved firewall change, the checklist becomes:
+In Ubuntu:
 
-```text
-DNS              ✓
-Routing          ✓
-Firewall         ✓
-TCP              ✓
-TLS              ✓
-HTTPS            ✓
-Document API     ✓
-S3               ✓
+```bash
+command -v curl || true
+curl --version
+sudo apt update
+sudo apt install -y curl
+curl --version
 ```
 
-### Lesson
+The diagnostic sequence is: confirm the command exists, locate it, install or repair the package, then verify the version.
 
-An API failure does not automatically mean there is a code defect. This incident was DNS, then a denied TCP 443 rule. The upload handler may have been correct the entire time.
+### File-permission exercise
 
-### Mini-exercise deliverable
+Use synthetic data in the Linux workspace:
 
-Write a short incident timeline (five to eight lines) that a change-advisory board could read: symptom, DNS finding, TCP finding, policy fix, verification order.
-
----
-
-## Capstone — Mortgage deployment topology
-
-**Time:** 45–60 minutes  
-**Needs local API:** No  
-**Type:** Design activities (diagrams and a communication matrix)
-
-Session 3 of the curriculum requires you to progress the mortgage capstone by drafting deployment topology for the portal, APIs, AI service, and database layer. Build the artifacts in order. Do not skip the communication matrix; it is the operational version of your diagram.
-
-### Business scenario
-
-The bank approved a cloud-hosted mortgage platform. You must show where each component lives, what is public, what is private, which flows are allowed, and how defense in depth and Zero Trust apply to document upload. This is a paper architecture on Windows (diagram tool of your choice: Whiteboard, PowerPoint, draw.io, or paper). You are not required to create AWS accounts or click-deploy infrastructure.
-
-### Activity 1 — Identify components
-
-List every component you will place on the diagram:
-
-- Mortgage Portal  
-- Mortgage API  
-- Document Service  
-- AI Service  
-- PostgreSQL  
-- Object storage (S3 or equivalent)  
-- Monitoring (for example CloudWatch / security monitoring)  
-- Edge: DNS, WAF, load balancer  
-
-Add any extra box your instructor requires (identity provider, secrets manager). If you add it, it must also appear in the communication matrix.
-
-### Activity 2 — Define exposure
-
-Classify each component:
-
-**Public (internet-facing or internet-reachable by design)**
-
-- Mortgage Portal (browser traffic)  
-- Public load balancer (and WAF in front of it)  
-
-**Private (not advertised to the internet)**
-
-- Mortgage APIs  
-- Document Service  
-- AI Service  
-- PostgreSQL  
-
-Rule you must state explicitly: **do not expose the database publicly.**
-
-### Activity 3 — Proposed topology (AWS-shaped, cloud-agnostic intent)
-
-Draw the following. You may label equivalents if the course uses another cloud.
-
-```text
-                         INTERNET
-                            |
-                            v
-                       Route 53 (DNS)
-                            |
-                            v
-                         AWS WAF
-                            |
-                            v
-                  Application Load Balancer
-                            |
-               =========================
-                       VPC
-               =========================
-
-                    Public subnets
-                         |
-                         v
-                       ALB
-                         |
-              -------------------------
-                   Trust boundary
-              -------------------------
-                         |
-                         v
-                  Private app subnets
-                  /       |        \
-                 /        |         \
-                v         v          v
-         Mortgage API  Document    AI Service
-                       Service
-                |         |
-                |         |
-                +----+----+
-                     |
-              -----------------
-                Data boundary
-              -----------------
-                     |
-               Private DB subnet
-                     |
-                     v
-                PostgreSQL / RDS
-
-Document Service
-       |
-       v
-      S3 (private access pattern)
-
-All services
-       |
-       v
-CloudWatch / security monitoring
+```bash
+mkdir -p ~/mortgage-lab/incoming
+printf 'loan_id,status\nLN-1001,CURRENT\n' > ~/mortgage-lab/incoming/loans.csv
+chmod 000 ~/mortgage-lab/incoming/loans.csv
+ls -l ~/mortgage-lab/incoming/loans.csv
+cat ~/mortgage-lab/incoming/loans.csv
 ```
 
-Check your drawing against this list:
+The `cat` command should fail for the normal file owner because all permissions were removed. Diagnose and restore owner/group read access:
 
-- DNS in front of WAF  
-- WAF in front of ALB  
-- ALB in public subnets  
-- APIs and AI in private app subnets  
-- PostgreSQL in a private data subnet  
-- S3 not drawn as a public website bucket  
-- monitoring attached to all services  
-
-### Activity 4 — Communication matrix
-
-Create this table in Excel, Word, or Markdown. Fill **Allow?** using Yes/No. Add a **Notes** column if you need a justification.
-
-| Source | Destination | Port | Allow? |
-| --- | --- | --- | --- |
-| Internet | ALB | 443 | Yes |
-| Internet | Mortgage API directly | Application port (for example 8080) | No |
-| Internet | PostgreSQL | 5432 | No |
-| Internet | AI Service directly | Any | No |
-| ALB | Mortgage API | Application port | Yes |
-| Mortgage API | PostgreSQL | 5432 | Yes |
-| Document Service | S3 | 443 (HTTPS) | Yes |
-| Mortgage API | AI Service | Application / HTTPS port | Yes |
-| Internet | Document Service directly | Any | No |
-| AI Service | PostgreSQL | 5432 | Instructor decision; default **No** unless a documented query path exists |
-
-This table is the start of an enterprise network-flow matrix. Any new arrow on your diagram must get a new row.
-
-### Activity 5 — Security zones
-
-Draw five zones and a **red line** between each pair. Those lines are trust boundaries (reuse Lab 2.10 questions).
-
-```text
-ZONE 0  Untrusted internet
-
-        ↓  (red line)
-
-ZONE 1  Edge security
-        Route 53, WAF, load balancer
-
-        ↓  (red line)
-
-ZONE 2  Application
-        Mortgage API, Document Service
-
-        ↓  (red line)
-
-ZONE 3  AI
-        AI Service
-
-        ↓  (red line)
-
-ZONE 4  Data
-        PostgreSQL, S3
+```bash
+stat ~/mortgage-lab/incoming/loans.csv
+chmod 640 ~/mortgage-lab/incoming/loans.csv
+ls -l ~/mortgage-lab/incoming/loans.csv
+cat ~/mortgage-lab/incoming/loans.csv
 ```
 
-Write one sentence per red line: what identity is required to cross.
+The final command should print the two-line synthetic CSV.
 
-### Activity 6 — Defense in depth for document upload
+## 15. Security checkpoint
 
-Map the borrower upload to layered controls. Annotate your topology with these stages (boxes or a numbered legend):
+Before finishing, confirm that you did not:
 
-```text
-Borrower
-   ↓
-HTTPS
-   ↓
-WAF
-   ↓
-Authentication
-   ↓
-Authorization
-   ↓
-Document validation
-   ↓
-Private application service
-   ↓
-Least-privilege access to storage
-   ↓
-Encrypted S3 (or equivalent)
-   ↓
-Audit logging
-   ↓
-Security monitoring
-```
+- use real borrower data;
+- store a database password in this Markdown file, shell history, source code, or a `.env` file;
+- commit a private SSH key;
+- upload `id_ed25519` instead of `id_ed25519.pub`; or
+- install an unmanaged duplicate of Docker Engine inside WSL.
 
-Defense in depth means more than one control must fail before `income-proof.pdf` is stored incorrectly or stolen. Label at least two controls that would still protect the bank if WAF were misconfigured.
+## Instructor verification
 
-### Activity 7 — Zero Trust for service-to-service calls
+Ask the learner to demonstrate the completion criteria, not just show installation screens. The instructor should capture versions and configuration as environment evidence, confirm Docker works from both shells, run the synthetic database query, and verify that no secrets or real PII were introduced.
 
-For **every** arrow between services on your diagram (API → PostgreSQL, API → AI, Document Service → S3), write the same six checks. Do not assume `internal = trusted`.
+## References checked
 
-```text
-Verify identity
-      ↓
-Verify authorization
-      ↓
-Apply least privilege
-      ↓
-Use secure communication (TLS)
-      ↓
-Log activity
-      ↓
-Monitor abnormal behavior
-```
+- [Install WSL](https://learn.microsoft.com/en-us/windows/wsl/install)
+- [Set up a WSL development environment](https://learn.microsoft.com/en-us/windows/wsl/setup/environment)
+- [Docker Desktop WSL 2 backend](https://docs.docker.com/desktop/features/wsl/)
+- [Developing in WSL with VS Code](https://code.visualstudio.com/docs/remote/wsl)
+- [Oracle Java downloads and release status](https://www.oracle.com/java/technologies/downloads/)
+- [IntelliJ IDEA SDK configuration](https://www.jetbrains.com/help/idea/sdk.html)
+- [PostgreSQL Windows installers](https://www.postgresql.org/download/windows/)
 
-Deliverable: a six-row checklist copied once per service-to-service flow, with the actual identity mechanism named (for example "task role," "managed identity," "mTLS service account"). Placeholder names are acceptable if the course has not chosen a vendor yet; blank rows are not.
-
-### Capstone completion checklist
-
-You are done when you can hand an instructor:
-
-1. Component list with public/private classification  
-2. Topology diagram matching Activity 3  
-3. Communication matrix with no internet path to PostgreSQL or to the AI service  
-4. Zone map with red trust-boundary lines  
-5. Document-upload defense-in-depth chain  
-6. Zero Trust checklist for each internal flow  
-
----
-
-## Appendix A — Windows command quick reference
-
-| Goal | Command |
-| --- | --- |
-| HTTP GET | `curl.exe http://127.0.0.1:8000/health` |
-| Verbose HTTP | `curl.exe -v http://127.0.0.1:8000/health` |
-| Listeners on a port | `netstat -ano \| findstr :8000` |
-| TCP test | `Test-NetConnection -ComputerName 127.0.0.1 -Port 8000` |
-| DNS | `nslookup example.com` |
-| Traceroute | `tracert example.com` |
-| HTTPS / TLS (curl) | `curl.exe -v https://example.com` |
-| Start API | `.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000` |
-
-Use `curl.exe` in Windows PowerShell 5.1. The alias `curl` invokes `Invoke-WebRequest` and does not accept the same switches.
-
-## Appendix B — Common Windows failures
-
-| Symptom | Likely cause | What to do |
-| --- | --- | --- |
-| `python` not recognized | PATH / launcher | Use `py -3` or complete Lab 01 |
-| `python` and `py -3` disagree | Two interpreters installed | Use only the one that created `.venv` |
-| Access denied creating `C:\Projects` | No write to `C:\` | Create `Documents\mortgage-network-lab` in File Explorer instead |
-| `pip` connection / SSL / proxy error | No route to PyPI | Instructor proxy or `--index-url`; do not skip package install |
-| `ERROR: Invalid requirement` on pip install | UTF-8 BOM in `requirements.txt` (often from Notepad "UTF-8") | Recreate the file in VS Code and save as UTF-8 |
-| `Activate.ps1` cannot be loaded | Execution policy | Do not activate; call `.venv\Scripts\python.exe` directly |
-| `[Errno 10048] address already in use` | Port 8000 occupied | `netstat -ano \| findstr :8000` then `taskkill /PID <PID> /F` after confirming the process |
-| Browser cannot open `http://localhost:8000` | IPv6 `::1` vs bind on `127.0.0.1` | Use `http://127.0.0.1:8000` only |
-| `/docs` is a blank page | Swagger UI CDN blocked | Use `curl.exe` and `/openapi.json` |
-| `curl: unrecognized option` | `curl` alias | Use `curl.exe` |
-| Port 8000 already in use after Ctrl+C | Leftover uvicorn reload child | `netstat -ano \| findstr :8000` then `taskkill /PID <PID> /F` after confirming the process |
-| Browser cannot open 127.0.0.1 | API not started or crashed | Wait for `Application startup complete`; check the uvicorn traceback |
-| `openssl` not found | Not on PATH | Use `C:\Program Files\Git\usr\bin\openssl.exe` or the Lab 2.6 .NET script |
-| OpenSSL `Verify return code: 20` | Git OpenSSL ignores Windows CAs | Acceptable if `curl.exe -v https://example.com` verifies; record cipher/subject anyway |
-| OpenSSL appears hung | Waiting for stdin | Use `cmd /c "echo Q | openssl s_client ..."` |
-| `Test-NetConnection` slow | DNS + ICMP + TCP timeout | Wait 20–40 seconds; or use the TcpClient snippet in Lab 2.2 |
-| Firewall popup | First bind to a public interface | Bind `127.0.0.1` as documented; do not open 8000 to the network |
-| Labs 2.4 / 2.6 / 2.8 fail | Outbound DNS/HTTPS/traceroute blocked | Record the corporate block; those labs need internet to public names |
-
-## Appendix C — Independence map
-
-| Lab | Local API required | Network used | Deliverable |
-| --- | --- | --- | --- |
-| 2.1 Trace path | Yes | Loopback HTTP | Working health, loan GET, simulated S3 file |
-| 2.2 Inspect connections | Yes | Loopback TCP | PID, LISTENING, Test-NetConnection True |
-| 2.3 Wrong port | Yes | Loopback 8000 vs 9000 | Written distinction: config vs code |
-| 2.4 DNS | No | Corporate DNS | NXDOMAIN vs successful lookup |
-| 2.5 HTTP inspection | Yes | Loopback HTTP | Annotated curl -v + Swagger try-out |
-| 2.6 TLS | No | Internet HTTPS to example.com | Protocol, cert, issuer, cipher |
-| 2.7 Firewall simulation | Yes (comparison) | Loopback 8000 vs 9999 | Troubleshooting sequence in notes |
-| 2.8 Trace route | No | Internet traceroute | Hop list |
-| 2.9 Architecture review | No | None | Written gaps + improved sketch |
-| 2.10 Trust boundaries | No | None | Four questions × three boundaries |
-| Mini exercise | No | Tabletop | Incident timeline |
-| Capstone | No | None | Six instructor artifacts |
+Vendor pages and software versions change. Re-check the approved organization catalog and the linked first-party pages before each classroom delivery.
